@@ -1,7 +1,7 @@
 # HTTP Foundation
 
 ## What this covers
-This section explores HTTP from the perspective of a server, suing only Node.js core modules. The goal is not to build applications, but to understand how requests and responses actually flow through the system.
+This section explores HTTP from the perspective of a server, using only Node.js core modules. The goal is not to build applications, but to understand how requests and responses actually flow through the system.
 
 ## Why start with HTTP
 HTTP is built on top of TCP and hides many important details
