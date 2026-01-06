@@ -9,7 +9,7 @@ Understanding the event model explains why Node.js can scale efficiently
 with a single thread and how servers handle many concurrent connections.
 
 Understanding this is essential for:
-- reasoning about request lifecycles
+- reasoning about request lifecycle
 - tracking active requests
 - understanding response completion
 - transitioning to raw TCP and custom protocols
