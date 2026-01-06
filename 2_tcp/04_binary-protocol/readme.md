@@ -42,6 +42,8 @@ This is how real systems (BitTorrent, databases, game servers, RPC layers) opera
 ## Wire format
 Each message follows a strict layout:
 
+[ length (4 bytes) ][ msgID (1 byte) ][ payload (N bytes) ]
+
 - **length**  
   Total size of the message body (msgID + payload)
 
