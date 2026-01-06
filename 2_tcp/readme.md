@@ -14,8 +14,6 @@ It covers:
 
 This is the lowest layer before building BitTorrent itself.
 
----
-
 ## Why TCP matters
 TCP is the transport layer everything else depends on.
 
@@ -32,8 +30,6 @@ It only guarantees:
 
 Everything else is the application’s responsibility.
 
----
-
 ## Key ideas
 - TCP is a continuous byte stream, not a message channel
 - One `data` event does **not** equal one logical message
@@ -49,8 +45,6 @@ Applications must:
 - validate protocol rules
 - handle partial input safely
 
----
-
 ## Conceptual model
 A TCP server is a long-lived, event-driven process that reacts to:
 - connections
@@ -64,8 +58,6 @@ At this layer:
 - state must be tracked per connection
 
 Protocols are not formats — they are state machines over a byte stream.
-
----
 
 ## What this enables next
 Understanding TCP at this level makes it clear why:
