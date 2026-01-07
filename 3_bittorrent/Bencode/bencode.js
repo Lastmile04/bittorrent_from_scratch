@@ -16,6 +16,8 @@ const server = net.createServer((socket)=>{
                 console.log("Decoded Message:", result.value);
                 // Move the offset to the end of the successfully parsed object
                 offset = result.nextOffset;
+
+                const encoded_data = encode(result.value);
             } catch (err) {
                 console.error("Protocol Error:", err.message);
                 socket.destroy(); // Close connection on malicious/bad data
@@ -217,7 +219,7 @@ function parseDictionary(buffer, offset){
                     nextOffset : dictStartOffset
                 };
             }
-            const key = keyResult.value.toString(); //JS object keys are strings
+            const key = keyResult.value;
             i = keyResult.nextOffset;
             // boundary check
             if(i >= buffer.length) return { incomplete : true, nextOffset : dictStartOffset};
@@ -239,6 +241,85 @@ function parseDictionary(buffer, offset){
         incomplete : true,
         nextOffset : dictStartOffset
     };
+}
+
+
+function encode(value){
+    switch (true) {
+        case Buffer.isBuffer(value):
+            return encodeString(value);
+
+        case typeof value === 'number':
+            if(!Number.isInteger(value)){
+                throw new Error('Protocol violation: Integers only');
+            }
+            return encodeInt(value);
+
+        case Array.isArray(value):
+            return encodeList(value);
+
+        case typeof value === 'object' && value !== null:
+            return encodeDict(value);
+
+        default:
+            throw new Error('Protocol violation: unsupported type');
+    }
+}
+
+function encodeString(value){
+    if(!Buffer.isBuffer(value)) throw new Error('Protocol violation: bencode string must be Buffer');
+
+    return Buffer.concat([
+        Buffer.from(String(value.length)),
+        Buffer.from(':'),
+        value
+    ]);
+}
+
+function encodeInt(value){
+    return Buffer.concat([
+        Buffer.from('i'),
+        Buffer.from(String(value)),
+        Buffer.from('e')
+    ]);
+}
+
+
+function encodeList(value){
+    const items = value.map(item => encode(item));
+
+    return Buffer.concat([
+        Buffer.from('l'),
+        ...items,
+        Buffer.from('e')
+    ]);
+}
+
+function encodeDict(value){
+    const header = Buffer.from('d');
+    const footer = Buffer.from('e');
+    const entries = Object.entries(value);
+
+    const encodedEntries = entries.map(([key, value])=>{
+        if(!typeof key !== 'string') throw new Error('Protocol violation: dictionary key must be string');
+        const keyBuffer = Buffer.from(key, 'utf-8')
+        return {keyBuffer, value}
+    });
+
+    encodedEntries.sort((a, b)=>{
+        Buffer.compare(a.keyBuffer, b.keyBuffer)
+    });
+
+    const parts = header;
+
+    for(const {keyBuffer, value} of encodedEntries){
+        parts.push(encodeString(keyBuffer));
+        parts.push(encode(value));
+    }
+
+    parts.push(footer);
+
+    return Buffer.concat(parts);
 }
 server.listen(4000, () => {
     console.log('TCP Server with state machine listening on 4000');
