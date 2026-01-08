@@ -47,6 +47,14 @@ const server = net.createServer((socket)=>{
 function isDigit(byte){
     return byte >= 0x30 && byte <= 0x39
 }
+
+const ProtocolTypes = {
+    INTEGER: 'Integer',
+    STRING:  'String', // Represents byte sequences (Buffer)
+    LIST:    'List',
+    DICT:    'Dictionary'
+};
+
 //main parsing decider
 function decode(buffer, offset){
     const peek = buffer[offset];
@@ -70,7 +78,7 @@ function decode(buffer, offset){
 function parseInteger(buffer, offset){
     let i = offset + 1; //skip 'i'
     let sign = 1;
-    let value = 0;
+    let result = 0;
     // validation check for -ive int
     if(buffer[i] === 0x2d){
         sign = -1;
@@ -86,11 +94,13 @@ function parseInteger(buffer, offset){
         // Termination logic
         if(byte === 0x65){
             if(!hasDigit) throw new Error('Empty Integer');
-            if(sign === -1 && value === 0) throw new Error("Invalid Integer: value can't be -0");
+            if(sign === -1 && result === 0) throw new Error("Invalid Integer: value can't be -0");
+            const final_res = result * sign;
+            const newOffset = i + 1;
             return{
-                value : value * sign,
-                nextOffset : i + 1 //skip e
-            };
+                value : {type: ProtocolTypes.INTEGER, value: final_res},
+                nextOffset : newOffset //skip e
+            }
         }
         if(!isDigit(byte)) throw new Error(`Invalid digit: ${String.fromCharCode(byte)}`);
         const digit = byte - 0x30;
@@ -98,7 +108,7 @@ function parseInteger(buffer, offset){
         if(isFirst && digit === 0) firstDigitWasZero = true;
         if(firstDigitWasZero && !isFirst) throw new Error("Protocol violation: No leading zeros allowed");
         // Accumulation(Shift and add)
-        value = value * 10 + digit;
+        result = result * 10 + digit;
         isFirst = false;
         hasDigit = true;
         i++;
@@ -152,7 +162,7 @@ function parseString(buffer, offset){
     if(buffer.length >= payloadEnd){
         const strValue = buffer.slice(payloadStart, payloadEnd);
         return{
-            value : strValue,
+            value : {type: ProtocolTypes.STRING, value: strValue},
             nextOffset : payloadEnd
         };
     }else{
@@ -167,25 +177,25 @@ function parseList(buffer, offset){
     if(buffer[offset] !== 0x6c) throw new Error('Protocol violation: first byte is not "0x6c" ');
     const listStartOffset = offset;
     let i = offset + 1;
-    let listValue = [];
+    let listItems = [];
     while(i < buffer.length){
         const byte = buffer[i];
         // Termination logic
         if(byte === 0x65){ //'e'
             return{
-                value : listValue,
+                value : { type: ProtocolTypes.LIST, value: listItems },
                 nextOffset : i + 1 //skip 'e'
             };
         } else{
             const result = decode(buffer, i);
             if(result.incomplete){
-                return{        
+                return{
                     incomplete : true,
                     nextOffset : listStartOffset
                 };
             }
             const {value, nextOffset} = result;
-            listValue.push(value);
+            listItems.push(value);
             i = nextOffset;
         }
     }
@@ -199,14 +209,14 @@ function parseDictionary(buffer, offset){
     if(buffer[offset] !== 0x64) throw new Error('Protocol violation: Expected dictionary');
     const dictStartOffset = offset;
     let i = offset + 1;
-    let dictValue = {};
+    let pairs = [];
 
     while( i < buffer.length){
         const byte = buffer[i];
         // Termination logic
         if(byte === 0x65){
             return{
-                value : dictValue,
+                value : { type: ProtocolTypes.DICT, value: pairs},
                 nextOffset : i + 1 //skip 'e'
             }
         }
@@ -219,7 +229,8 @@ function parseDictionary(buffer, offset){
                     nextOffset : dictStartOffset
                 };
             }
-            const key = keyResult.value;
+            const keyIR = keyResult.value;
+            const keyBuffer = keyIR.value;
             i = keyResult.nextOffset;
             // boundary check
             if(i >= buffer.length) return { incomplete : true, nextOffset : dictStartOffset};
@@ -231,7 +242,7 @@ function parseDictionary(buffer, offset){
                     nextOffset : dictStartOffset
                 };
             }
-            dictValue[key] = valueResult.value;
+            pairs.push([keyBuffer, valueResult.value]);
             i = valueResult.nextOffset;
         }else{
             throw new Error('Protocol violation: Mandatory String byte missing!')
@@ -244,25 +255,28 @@ function parseDictionary(buffer, offset){
 }
 
 
-function encode(value){
-    switch (true) {
-        case Buffer.isBuffer(value):
-            return encodeString(value);
+function encode(irObject){
 
-        case typeof value === 'number':
-            if(!Number.isInteger(value)){
-                throw new Error('Protocol violation: Integers only');
-            }
-            return encodeInt(value);
+    // Only accept Valid Protocol Values
+    if (!irObject || !irObject.type) {
+        throw new Error("Protocol Violation: Encoder received a non-IR value");
+    }
 
-        case Array.isArray(value):
-            return encodeList(value);
+    switch (irObject.type) {
+        case ProtocolTypes.INTEGER:
+            return encodeInteger(irObject.value);
 
-        case typeof value === 'object' && value !== null:
-            return encodeDict(value);
+        case ProtocolTypes.STRING:
+            return encodeString(irObject.value);
+
+        case ProtocolTypes.LIST:
+            return encodeList(irObject.value);
+
+        case ProtocolTypes.DICT:
+            return encodeDict(irObject.value); // Expects strict pairs
 
         default:
-            throw new Error('Protocol violation: unsupported type');
+            throw new Error(`Unknown Protocol Type: ${irObject.type}`);
     }
 }
 
@@ -276,7 +290,7 @@ function encodeString(value){
     ]);
 }
 
-function encodeInt(value){
+function encodeInteger(value){
     return Buffer.concat([
         Buffer.from('i'),
         Buffer.from(String(value)),
@@ -295,32 +309,25 @@ function encodeList(value){
     ]);
 }
 
-function encodeDict(value){
-    const header = Buffer.from('d');
-    const footer = Buffer.from('e');
-    const entries = Object.entries(value);
+function encodeDict(pairs){
+    const parts = [Buffer.from('d')];
+    const sortedPairs = [...pairs];
 
-    const encodedEntries = entries.map(([key, value])=>{
-        if(!typeof key !== 'string') throw new Error('Protocol violation: dictionary key must be string');
-        const keyBuffer = Buffer.from(key, 'utf-8')
-        return {keyBuffer, value}
-    });
+    sortedPairs.sort((a,b)=> Buffer.compare(a[0], b[0]));
 
-    encodedEntries.sort((a, b)=>{
-        Buffer.compare(a.keyBuffer, b.keyBuffer)
-    });
+    for (const [keyBuffer, valIR] of sortedPairs){
+        if(!Buffer.isBuffer(keyBuffer)) throw new Error('Protocol violation: Dictionary key must be a Buffer');
 
-    const parts = header;
-
-    for(const {keyBuffer, value} of encodedEntries){
         parts.push(encodeString(keyBuffer));
-        parts.push(encode(value));
+        parts.push(encode(valIR));
     }
-
-    parts.push(footer);
-
+    parts.push(Buffer.from('e'));
     return Buffer.concat(parts);
 }
+
 server.listen(4000, () => {
     console.log('TCP Server with state machine listening on 4000');
 });
+
+//Optimize the buffer growth.
+// Have to implement CircularBuffer/Buffer Pools
