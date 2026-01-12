@@ -139,6 +139,7 @@ function parseString(buffer, offset){
             strLength = strLength * 10 + digit;
             isFirst = false;
             hasLength = true;
+            i++;
         }
         else if(byte === 0x3a){ //Length parsing is done
             if(!hasLength) throw new Error('Protocol violation: Empty String');
