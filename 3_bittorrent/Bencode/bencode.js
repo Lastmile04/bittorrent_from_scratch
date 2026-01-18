@@ -283,4 +283,3 @@ function encodeDict(pairs){
 }
 //Optimize the buffer growth.
 // Have to implement CircularBuffer/Buffer Pools
-export { decode, encode, ProtocolTypes };
