@@ -238,7 +238,7 @@ function encode(irObject){
 }
 
 function encodeString(value){
-    if(!Buffer.isBuffer(value)) throw new Error('Protocol violation: bencode string must be Buffer');
+    if(!Buffer.isBuffer(value)) throw new Error('Protocol violation: BenCode string must be Buffer');
 
     return Buffer.concat([
         Buffer.from(String(value.length)),
@@ -281,5 +281,8 @@ function encodeDict(pairs){
     parts.push(Buffer.from('e'));
     return Buffer.concat(parts);
 }
+
+export { decode, encode, ProtocolTypes };
+
 //Optimize the buffer growth.
 // Have to implement CircularBuffer/Buffer Pools

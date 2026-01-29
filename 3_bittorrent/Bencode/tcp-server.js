@@ -1,5 +1,7 @@
 import net from 'net';
+import { getInfoSection } from './InfoByte.js';
 import { decode, encode } from './bencode.js';
+
 const server = net.createServer((socket)=>{
     let buffer = Buffer.alloc(0);
     socket.on('data', (chunk)=>{
