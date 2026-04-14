@@ -1,3 +1,5 @@
+import { Buffer } from 'buffer';
+
 const MAX_ALLOWED = 655360;
 // helper function
 function isDigit(byte){
