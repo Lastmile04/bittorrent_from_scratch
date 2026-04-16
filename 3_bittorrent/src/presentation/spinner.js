@@ -7,6 +7,7 @@ export class Spinner{
         this.frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
         this.running = false;
         this.timer = null;
+        this.cursorHidden = false;
     }
 
     start(){
@@ -14,7 +15,10 @@ export class Spinner{
         this.running = true;
 
         let x = 0;
-        process.stdout.write('\u001B[?25l');
+        if (!this.cursorHidden) {
+            process.stdout.write('\u001B[?25l'); // hide cursor
+            this.cursorHidden = true;
+        }
 
         this.timer = setInterval(()=>{
             const frame = this.frames[x++ % this.frames.length];
@@ -31,13 +35,29 @@ export class Spinner{
            this.timer = null;
         }
 
-        process.stdout.write('\u001B[?25h'); // Show cursor
+        if (this.cursorHidden) {
+            process.stdout.write('\u001B[?25h'); // show cursor
+            this.cursorHidden = false;
+        }
 
         const symbol = status === 'success' ? '✔' : '✖';
         // Clear the line one last time so the final message is clean
         process.stdout.write(`\r\x1B[2K${symbol} Peer ${this.ip}:${this.port} - ${status.toUpperCase()}\n`);
 
 
+    }
+
+    onConnecting() {
+        this.start(); // show animated "Trying ..."
+    }
+
+    onSuccess() {
+        this.stop('success');
+    }
+
+    onFail(err) {
+        this.stop('fail');
+        process.stdout.write(`      Reason: ${err.message}\n`);
     }
 
 }

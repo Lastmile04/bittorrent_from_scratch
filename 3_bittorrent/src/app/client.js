@@ -15,28 +15,30 @@ export async function createClient(list, infoHash, peerId){
         // Pass i + 1 for human-friendly "Attempt 1/50"
         const spinner = new Spinner(peer.ip, peer.port, i + 1, list.length);
         
+        const cleanup = bindPeerToSpinner(btPeer, spinner);
 
         try{
-
-            spinner.start();
-
+            
+            
+    
             // Await the handshake verification
             const result = await btPeer.connect();
 
+            cleanup();
+
             // Stop spinner FIRST to clear the line for the next logs
-            spinner.stop('success');
+            return result;
+            
 
             // will add the tick and cross just because i like it
             // Log details underneath the success line
-            console.log(`   └─ Peer ID: ${result.remotePeerIdHex}`);
-            console.log(`   └─ Leftover: ${result.leftoverBuffer?.length || 0} bytes`);
 
-            return  result;
+
 
         } catch (err) {
-            spinner.stop('fail');
-            // Log the error quietly so it doesn't wreck the UI
-            console.error(`      Reason: ${err.message}`); 
+            // console.log("FAIL:", err.type, err.message);
+            cleanup();
+            client.destroy();
 
             // client.destroy(); 
             continue;
@@ -52,3 +54,27 @@ export async function createClient(list, infoHash, peerId){
 //  Currently this approach is sequential, even though in real world it's parallel + promise.race
 // NOTE: this design decision is for MVP and will be updated in future iterations
  
+function bindPeerToSpinner(btPeer, spinner){
+    const onConnecting = () => {
+        console.log("CONNECTING EVENT FIRED");
+        spinner.onConnecting();
+    };
+    const onSuccess = () => spinner.onSuccess('success');
+    const onFail = (err) => spinner.onFail('fail');
+
+    btPeer.on('CONNECTING', onConnecting);
+    btPeer.on('HANDSHAKE_SUCCESS', onSuccess);
+    btPeer.on('CONNECT_SUCCESS', ()=> {});
+    btPeer.on("CONNECTION_CLOSED", () => {});
+    btPeer.on("SOCKET_CLOSED", () => {});
+
+    btPeer.on('ERROR', onFail);
+    btPeer.on("PEER_ERROR", onFail);
+    btPeer.on("SOCKET_ERROR", onFail);
+
+    return ()=>{
+        btPeer.off('CONNECTING', onConnecting);
+        btPeer.off('HANDSHAKE_SUCCESS', onSuccess);
+        btPeer.off('ERROR', onFail);
+    }
+}

@@ -1,7 +1,9 @@
+import EventEmitter from 'node:events';
 // This class can work normally for a proper bittorrent protocl but for MVP i need to expose the parseHandshake result
 // handle the connect and peer object and onError() bugs resolve reject multiple times and no timeout for connect()
-export class BitTorrentPeer{
+export class BitTorrentPeer extends EventEmitter{
     constructor(socket, infoHash, peerId, protocolStr, peer, timeout = 10_000){
+        super();
         this.socket = socket;
         this.infoHash = infoHash;
         this.peerId = peerId;
@@ -12,6 +14,7 @@ export class BitTorrentPeer{
 
         this.ip = peer.ip;
         this.port = peer.port;
+        
 
         // protocol state
         this.choked = true;
@@ -37,12 +40,30 @@ export class BitTorrentPeer{
         this.handleError = this.onError.bind(this);
         this.handleConnect = this.onConnect.bind(this);
 
+        this.socket.on('error', (err) => {
+            // prevent crash
+            this.fail({
+                type: "SOCKET_ERROR",
+                message: err.message
+            });
+        
+        });
+
+        this.socket.on('close', () => {
+            if (!this.finished) {
+                this.fail({
+                    type: "SOCKET_CLOSED",
+                    message: "Socket closed unexpectedly"
+                });
+            }
+        });
+
     }
 
-    
     // to expose the result of peerHandshake
     connect(){
         if(this.connectStarted === true) throw new Error('The reuse of connect() instance is not allowed!');
+
         return new Promise((res, rej)=>{
                 this.connectStarted = true;
                 this.resolve = res;
@@ -52,10 +73,13 @@ export class BitTorrentPeer{
                 this.attachTransportHandlers();
 
                 this.connectTimeout = setTimeout(()=>{
-                    this.fail(new Error(`Handshake timeout for peer ${this.ip}:${this.port}`));
+                    const err = new Error(`Handshake timeout for peer ${this.ip}:${this.port}`);
+                    err.type = 'PEER_TIMEOUT';
+                    this.fail(err);
                 }, this.timeout);
 
                 this.socket.connect(this.port, this.ip);
+                this.emit("CONNECTING", { peer: `${this.ip}:${this.port}` });
         });
     }
 
@@ -82,28 +106,38 @@ export class BitTorrentPeer{
     }
 
     cleanup(){
-        clearTimeout(this.connectTimeout);
-        this.connectTimeout = null;
-        this.detachTransportHandlers();
+        if (this.connectTimeout) {
+            clearTimeout(this.connectTimeout);
+            this.connectTimeout = null;
+        }
+            this.socket.setTimeout(0);
+            this.detachTransportHandlers();
     }
 
     succeed(value){
         if(this.finished) return;
         this.finished = true;
         this.cleanup();
+        this.emit("HANDSHAKE_SUCCESS", value);
         this.resolve(value);
     }
 
     fail(err){
         if(this.finished) return;
         this.finished = true;
+        this.emit("ERROR", {
+            peer: `${this.ip}:${this.port}`,
+            type: err.type || "UNKNOWN",
+            message: err.message || "Unknown error"
+        });
         this.cleanup();
         this.socket.destroy();
         this.reject(err);
     }
 
+
     onConnect(){
-        console.log(`Connection with peer ${this.ip}:${this.port} established`);
+        this.emit("CONNECT_SUCCESS", { peer: `${this.ip}:${this.port}` });
         this.sendHandshake();
     }
 
@@ -118,11 +152,12 @@ export class BitTorrentPeer{
         try {
             const handshake_msg = Buffer.concat([pstrlen, pstr, reserved, this.infoHash, this.peerId]);
             this.socket.write(handshake_msg);
+            this.emit("HANDSHAKE_SENT", { peer: `${this.ip}:${this.port}` });
         } catch (err) {
-            console.error('[Peer] Failed to send handshake:', err.message);
-            this.socket.destroy();
+
+            this.fail(err);
+            
         }
-        
     }
 
     onData(chunk) {
@@ -172,20 +207,24 @@ export class BitTorrentPeer{
 
         // check protocol string length
         if(receivedPstrlen !== expectedPstrLen){
-            throw new Error('Protocol length mismatch');
+            const err = new Error('Protocol length mismatch');
+            err.type = "PROTOCOL_MISMATCH";
+            throw err;
         } 
 
         const handshakeStart = 0;
-        const handshakeEnd = receivedPstrlen + 49;
-        const handshake = this.buffer.slice(handshakeStart,handshakeEnd);
+        const handshakeEnd = expectedPstrLen + 49;
+        const handshake = this.buffer.subarray(handshakeStart,handshakeEnd);
 
         const protocolStart = 1
-        const protocolEnd = 1+receivedPstrlen;
-        const protocol = handshake.slice(protocolStart, protocolEnd);
+        const protocolEnd = 1+expectedPstrLen;
+        const protocol = handshake.subarray(protocolStart, protocolEnd);
 
         // check protocol string
         if (!protocol.equals(this.protocolStr)) {
-            throw new Error('Protocol mismatch');
+            const err = new Error('Protocol mismatch');
+            err.type = "PROTOCOL_MISMATCH";
+            throw err;
             
         }
 
@@ -197,19 +236,18 @@ export class BitTorrentPeer{
         const peerIdEnd = peerIdStart + 20;
         const totalHandshakeLength = peerIdEnd;
 
-        const remoteInfoHash = handshake.slice(infoHashStart , infoHashEnd );
-        const remotePeerId = handshake.slice(peerIdStart, peerIdEnd);
+        const remoteInfoHash = handshake.subarray(infoHashStart , infoHashEnd );
+        const remotePeerId = handshake.subarray(peerIdStart, peerIdEnd);
         
 
         // check infoHash
         if (!remoteInfoHash.equals(this.infoHash)){
-            throw new Error('InfoHash mismatch');
+            const err =  new Error('InfoHash mismatch');
+            err.type = "INFOHASH_MISMATCH";
+            throw err;
         }
 
         this.remotePeerId = Buffer.from(remotePeerId);
-
-        console.log(`[Peer]: ${this.ip}:${this.port} Handshake verified with:`, remotePeerId.toString('hex'));
-        
 
          return {
             peer: this.peer,
@@ -224,18 +262,26 @@ export class BitTorrentPeer{
 
     onEnd() {
         if(!this.handshakeComplete){
-            this.fail(new Error(`Peer ended stream before handshake: ${this.ip}:${this.port}`));
+            const err = new Error(`Peer ended stream before handshake: ${this.ip}:${this.port}`);
+            err.type = "PEER_ERROR";
+            this.fail(err);
             return;
         };
-        console.log('[Peer] read side closed');
+        this.emit("CONNECTION_CLOSED", {
+            peer: `${this.ip}:${this.port}`
+        });
     }
 
     onClose() {
         if (!this.handshakeComplete && !this.finished) {
-            this.fail(new Error(`Socket closed before handshake: ${this.ip}:${this.port}`));
+            const err = new Error(`Socket closed before handshake: ${this.ip}:${this.port}`);
+            err.type = "SOCKET_ERROR";
+            this.fail(err);
             return;
         }
-        console.log('[Peer] socket closed');
+        this.emit("SOCKET_CLOSED", {
+            peer: `${this.ip}:${this.port}`
+        });
     }
 
     onError(err) {
