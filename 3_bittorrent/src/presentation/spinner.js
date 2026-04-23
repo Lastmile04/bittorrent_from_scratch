@@ -1,17 +1,17 @@
-export class Spinner{
-    constructor(ip, port, attempt, max){
+export class Spinner {
+    constructor(ip, port, attempt, max) {
         this.ip = ip;
         this.port = port;
         this.attempt = attempt;
         this.max = max;
-        this.frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+        this.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         this.running = false;
         this.timer = null;
         this.cursorHidden = false;
     }
 
-    start(){
-        if(this.running) return;
+    start() {
+        if (this.running) return;
         this.running = true;
 
         let x = 0;
@@ -20,19 +20,19 @@ export class Spinner{
             this.cursorHidden = true;
         }
 
-        this.timer = setInterval(()=>{
+        this.timer = setInterval(() => {
             const frame = this.frames[x++ % this.frames.length];
             process.stdout.write(`\r\x1B[2K${frame} Trying ${this.ip}:${this.port} (attempt ${this.attempt}/${this.max})`);
         }, 80);
     }
 
-    stop(status){
+    stop(status) {
         if (!this.running) return;
         this.running = false;
-    
+
         if (this.timer) {
-           clearInterval(this.timer);
-           this.timer = null;
+            clearInterval(this.timer);
+            this.timer = null;
         }
 
         if (this.cursorHidden) {
