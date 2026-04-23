@@ -1,8 +1,9 @@
-import EventEmitter from 'node:events';
+// NOTE: Currently this is not a full fledged peer, this class is nore of a leecher(downloader), more functionality will be added in the future to make it into a complete peer that can leech(download) as well as seed(upload)
+import EventEmitter, { defaultMaxListeners } from 'node:events';
 // This class can work normally for a proper bittorrent protocl but for MVP i need to expose the parseHandshake result
 // handle the connect and peer object and onError() bugs resolve reject multiple times and no timeout for connect()
-export class BitTorrentPeer extends EventEmitter{
-    constructor(socket, infoHash, peerId, protocolStr, peer, timeout = 10_000){
+export class BitTorrentPeer extends EventEmitter {
+    constructor(socket, infoHash, peerId, protocolStr, peer, timeout = 10_000) {
         super();
         this.socket = socket;
         this.infoHash = infoHash;
@@ -14,14 +15,21 @@ export class BitTorrentPeer extends EventEmitter{
 
         this.ip = peer.ip;
         this.port = peer.port;
-        
+
 
         // protocol state
         this.choked = true;
         this.interested = false;
+        this.bitfield = null;
+        // Some pre-defined instances for later
+        this.pendingRequests = [];
+        this.receivedPieces = {};
+        this.incomingRequests = [];
+
         this.peerChoking = true;
         this.peerInterested = false;
-        this.bitfield = null;
+        this.peerBitfield = null;
+
         this.buffer = Buffer.alloc(0);
         this.handshakeComplete = false;
 
@@ -34,7 +42,8 @@ export class BitTorrentPeer extends EventEmitter{
         this.connectStarted = false;
 
         // attach transport handlers
-        this.handleData = this.onData.bind(this);
+        // bind the data events to "this" instance of this class then store the reference of these functions
+        // in the usual method this.onConnect will refer to the inbuilt socket class not this BitTorrentPeer class  this.handleData = this.onData.bind(this);
         this.handleEnd = this.onEnd.bind(this);
         this.handleClose = this.onClose.bind(this);
         this.handleError = this.onError.bind(this);
@@ -46,7 +55,7 @@ export class BitTorrentPeer extends EventEmitter{
                 type: "SOCKET_ERROR",
                 message: err.message
             });
-        
+
         });
 
         this.socket.on('close', () => {
@@ -61,31 +70,31 @@ export class BitTorrentPeer extends EventEmitter{
     }
 
     // to expose the result of peerHandshake
-    connect(){
-        if(this.connectStarted === true) throw new Error('The reuse of connect() instance is not allowed!');
+    connect() {
+        if (this.connectStarted === true) throw new Error('The reuse of connect() instance is not allowed!');
 
-        return new Promise((res, rej)=>{
-                this.connectStarted = true;
-                this.resolve = res;
-                this.reject = rej;
-                this.finished = false;
+        return new Promise((res, rej) => {
+            this.connectStarted = true;
+            this.resolve = res;
+            this.reject = rej;
+            this.finished = false;
 
-                this.attachTransportHandlers();
+            this.attachTransportHandlers();
 
-                this.connectTimeout = setTimeout(()=>{
-                    const err = new Error(`Handshake timeout for peer ${this.ip}:${this.port}`);
-                    err.type = 'PEER_TIMEOUT';
-                    this.fail(err);
-                }, this.timeout);
+            this.connectTimeout = setTimeout(() => {
+                const err = new Error(`Handshake timeout for peer ${this.ip}:${this.port}`);
+                err.type = 'PEER_TIMEOUT';
+                this.fail(err);
+            }, this.timeout);
 
-                this.socket.connect(this.port, this.ip);
-                this.emit("CONNECTING", { peer: `${this.ip}:${this.port}` });
+            this.socket.connect(this.port, this.ip);
+            this.emit("CONNECTING", { peer: `${this.ip}:${this.port}` });
         });
     }
 
     // attack listeners inside one function
-    attachTransportHandlers(){
-        
+    attachTransportHandlers() {
+
         this.socket.on('data', this.handleData);
         this.socket.once('end', this.handleEnd);
         this.socket.once('close', this.handleClose);
@@ -95,7 +104,7 @@ export class BitTorrentPeer extends EventEmitter{
     }
 
     // detach listener inside a single function
-    detachTransportHandlers(){
+    detachTransportHandlers() {
 
         this.socket.off('data', this.handleData);
         this.socket.off('end', this.handleEnd);
@@ -105,25 +114,19 @@ export class BitTorrentPeer extends EventEmitter{
 
     }
 
-    cleanup(){
+
+    cleanup() {
         if (this.connectTimeout) {
             clearTimeout(this.connectTimeout);
             this.connectTimeout = null;
         }
-            this.socket.setTimeout(0);
-            this.detachTransportHandlers();
+        this.socket.setTimeout(0);
+        this.detachTransportHandlers();
     }
 
-    succeed(value){
-        if(this.finished) return;
-        this.finished = true;
-        this.cleanup();
-        this.emit("HANDSHAKE_SUCCESS", value);
-        this.resolve(value);
-    }
 
-    fail(err){
-        if(this.finished) return;
+    fail(err) {
+        if (this.finished) return;
         this.finished = true;
         this.emit("ERROR", {
             peer: `${this.ip}:${this.port}`,
@@ -136,7 +139,7 @@ export class BitTorrentPeer extends EventEmitter{
     }
 
 
-    onConnect(){
+    onConnect() {
         this.emit("CONNECT_SUCCESS", { peer: `${this.ip}:${this.port}` });
         this.sendHandshake();
     }
@@ -144,7 +147,7 @@ export class BitTorrentPeer extends EventEmitter{
 
     // Bittorrent handshake format:
     // <pstrlen><pstr><reserved><infoHash><peerId>
-    sendHandshake(){
+    sendHandshake() {
         const pstr = this.protocolStr;
         const pstrlen = Buffer.from([pstr.length]);
         const reserved = Buffer.alloc(8);
@@ -156,135 +159,274 @@ export class BitTorrentPeer extends EventEmitter{
         } catch (err) {
 
             this.fail(err);
-            
+
         }
     }
 
     onData(chunk) {
+        if (this.finished) return;
+        // Accumulate incoming bytes
+        this.buffer = Buffer.concat([this.buffer, chunk]);
 
-        try {
-            // Accumulate incoming bytes
-            this.buffer = Buffer.concat([this.buffer, chunk]);
+        while (this.buffer.length > 0) {
+            //  --- handshake phase ---
+            if (!this.handshakecomplete) {
 
-            // We only care about the Handshake phase
-            if (!this.handshakeComplete) {
-                if (this.buffer.length < 1) return;
+                if (this.buffer.length < 1) break;
 
-                const receivedPstrlen = this.buffer[0];
-                const handshakeLen = receivedPstrlen + 49;
+                const receivedpstrlen = this.buffer[0];
+                const handshakelen = receivedpstrlen + 49;
 
-                // Wait until the full handshake is in the buffer
-                if (this.buffer.length < handshakeLen) return;
+                // wait until the full handshake is in the buffer
+                if (this.buffer.length < handshakelen) break;
 
-                // Parse and verify
-                const parsed = this.parseHandshake();
-                this.handshakeComplete = true;
-
-                // Consume ONLY the handshake bytes
-                this.buffer = this.buffer.slice(parsed.bytesConsumed);
-
-                
-                // We resolve with the parsed data AND the remaining buffer.
-                // This is crucial if a Bitfield was sent in the same packet!
-                this.succeed({
-                    ...parsed,
-                    leftoverBuffer: this.buffer 
-                });
-
-                // We stop here. cleanup() will run via succeed(), 
-                // detaching this listener and making the class a "zombie."
+                let parsed = 0;
+                try {
+                    // parse and verify
+                    parsed = this.parsehandshake();
+                    this.emit("HANDSHAKE_SUCCESS", parsed);
+                    this.handshakecomplete = true;
+                } catch (err) {
+                    this.fail(err);
+                    return;
+                }
+                // consume only the handshake bytes
+                this.buffer = this.buffer.slice(parsed.bytesconsumed);
             }
-        } catch (err) {
-                this.fail(err);
+            //  --- massage parsing phase ---
+            else {
+                if (this.buffer.length < 4) break;
+
+                const length = this.buffer.readUInt32BE(0);
+
+                // handle keep alives
+                if (length === 0) {
+                    this.emit("KEEP_ALIVE");
+                    this.buffer = this.buffer.slice(4);  // consume the length bytes only
+                    continue;
+                }
+
+                const msgLen = 4 + length;
+                if (this.buffer.length < msgLen) break;
+
+                try {
+                    const msgPayload = this.buffer.subarray(0, msgLen);
+                    this.buffer = this.buffer.slice(msgLen);
+                    const msg = this.parseMsg(msgPayload);
+                    handleMsg(msg);
+                }
+                catch (err) {
+                    this.fail(err);
+                    return;
+                }
             }
+        }
     }
 
     // parese the response handshake
-    parseHandshake(){
-        
-        const expectedPstrLen = this.protocolStr.length;
-        const receivedPstrlen = this.buffer[0];
+    parsehandshake() {
+
+        const expectedpstrlen = this.protocolstr.length;
+        const receivedpstrlen = this.buffer[0];
 
         // check protocol string length
-        if(receivedPstrlen !== expectedPstrLen){
-            const err = new Error('Protocol length mismatch');
-            err.type = "PROTOCOL_MISMATCH";
+        if (receivedpstrlen !== expectedpstrlen) {
+            const err = new Error('protocol length mismatch');
+            err.type = "protocol_mismatch";
             throw err;
-        } 
+        }
 
-        const handshakeStart = 0;
-        const handshakeEnd = expectedPstrLen + 49;
-        const handshake = this.buffer.subarray(handshakeStart,handshakeEnd);
+        const handshakestart = 0;
+        const handshakeend = expectedpstrlen + 49;
+        const handshake = this.buffer.subarray(handshakestart, handshakeend);
 
-        const protocolStart = 1
-        const protocolEnd = 1+expectedPstrLen;
-        const protocol = handshake.subarray(protocolStart, protocolEnd);
+        const protocolstart = 1
+        const protocolend = 1 + expectedpstrlen;
+        const protocol = handshake.subarray(protocolstart, protocolend);
 
         // check protocol string
-        if (!protocol.equals(this.protocolStr)) {
-            const err = new Error('Protocol mismatch');
-            err.type = "PROTOCOL_MISMATCH";
+        if (!protocol.equals(this.protocolstr)) {
+            const err = new Error('protocol mismatch');
+            err.type = "protocol_mismatch";
             throw err;
-            
+
         }
 
-        const reservedStart = protocolEnd;
-        const reservedEnd = reservedStart + 8;
-        const infoHashStart = reservedEnd;
-        const infoHashEnd = infoHashStart + 20;
-        const peerIdStart = infoHashEnd;
-        const peerIdEnd = peerIdStart + 20;
-        const totalHandshakeLength = peerIdEnd;
+        const reservedstart = protocolend;
+        const reservedend = reservedstart + 8;
+        const infohashstart = reservedend;
+        const infohashend = infohashstart + 20;
+        const peeridstart = infohashend;
+        const peeridend = peeridstart + 20;
+        const totalhandshakelength = peeridend;
 
-        const remoteInfoHash = handshake.subarray(infoHashStart , infoHashEnd );
-        const remotePeerId = handshake.subarray(peerIdStart, peerIdEnd);
-        
+        const remoteinfohash = handshake.subarray(infohashstart, infohashend);
+        const remotepeerid = handshake.subarray(peeridstart, peeridend);
 
-        // check infoHash
-        if (!remoteInfoHash.equals(this.infoHash)){
-            const err =  new Error('InfoHash mismatch');
-            err.type = "INFOHASH_MISMATCH";
+
+        // check infohash
+        if (!remoteinfohash.equals(this.infohash)) {
+            const err = new Error('infohash mismatch');
+            err.type = "infohash_mismatch";
             throw err;
         }
 
-        this.remotePeerId = Buffer.from(remotePeerId);
+        this.remotepeerid = Buffer.from(remotepeerid);
 
-         return {
+        return {
             peer: this.peer,
             ip: this.ip,
             port: this.port,
-            remotePeerId,
-            remotePeerIdHex: remotePeerId.toString('hex'),
+            remotepeerid,
+            remotepeeridhex: remotepeerid.toString('hex'),
             handshake,
-            bytesConsumed: totalHandshakeLength,
+            bytesconsumed: totalhandshakelength,
         };
     }
 
-    onEnd() {
-        if(!this.handshakeComplete){
-            const err = new Error(`Peer ended stream before handshake: ${this.ip}:${this.port}`);
-            err.type = "PEER_ERROR";
+    parseMsg(msg) {
+
+        const id = msg[4];
+        let payload = Buffer.from(msg.subarray(5));
+        switch (id) {
+            case 0: return { type: "CHOKE" };
+            case 1: return { type: "UNCHOKE" };
+            case 2: return { type: "INTERESTED" };
+            case 3: return { type: "NOT_INTERESTED" };
+            case 4:
+                if (payload.length !== 4) {
+                    const err = new Error('Have length mismatch');
+                    err.type = "msg_length_mismatch";
+                    throw err;
+                }
+                return { type: "HAVE", pieceIndex: payload.readUInt32BE(0) };
+
+            case 5:
+                return {
+                    type: "BITFIELD",
+                    bitfield: payload,
+                }
+            case 6:
+
+                if (payload.length !== 12) {
+                    const err = new Error('Request length mismatch');
+                    err.type = "msg_length_mismatch";
+                    throw err;
+                }
+                return {
+                    type: "REQUEST",
+                    request: { index: payload.readUInt32BE(0), begin: payload.readUInt32BE(4), length: payload.readUInt32BE(8) },
+                }
+            case 7:
+                if (payload.length < 8) {
+                    const err = new Error('Piece length mismatch');
+                    err.type = "msg_lenght_mismatch";
+                    throw err;
+                }
+                return {
+                    type: "PIECE",
+                    piece: { index: payload.readUInt32BE(0), begin: payload.readUInt32BE(4), block: payload.subarray(8) },
+                }
+            case 8:
+
+                if (payload.length !== 12) {
+                    const err = new Error('Cancel length mismatch');
+                    err.type = "msg_length_mismatch";
+                    throw err;
+                }
+                return {
+                    type: "CANCEL",
+                    request: { index: payload.readUInt32BE(0), begin: payload.readUInt32BE(4), length: payload.readUInt32BE(8) },
+                }
+            default:
+                return { type: "UNKNOWN", id }
+        }
+    }
+
+    handleMsg(msgObj) {
+        switch (msgObj.type) {
+            case "CHOKE":
+                this.peerChoking = true;
+                this.clearPendingRequests();
+                // NOTE: For later ->clear pendingRequests 
+                break;
+
+            case "UNCHOKE":
+                this.peerChoking = false;
+                if (this.interested) this.sendRequests();
+                // start sending requests
+                break;
+
+            case "INTERESTED":
+                this.peerInterested = true;
+                break;
+
+            case "NOT_INTERESTED":
+                this.peerInterested = false;
+                break;
+
+            case "HAVE":
+                this.updatePeerBitfield(msgObj.pieceIndex);
+                if (this.checkInterested()) this.sendInterested();
+                break;
+
+            case "BITFIELD":
+                this.peerBitfield = msgObj.bitfield;
+                if (this.checkInterested()) this.sendInterested();
+                break;
+
+            case "REQUEST":
+                // NOTE: in future the request will be pushed to the received requests array
+                // NOTE: In Future TODO: make request working
+                this.incomingRequests.push(msgObj.request);
+                break;
+
+            case "PIECE":
+                const { index, begin, block } = msgObj.piece;
+
+                if (!this.receivedPieces[index]) this.receivedPieces[index] = [];
+                this.receivedPieces[index].push({ begin, block });
+                break;
+
+            case "CANCEL":
+                // NOTE: Pending for future
+                break;
+
+            default:
+                return { type: msgObj.type }
+        }
+    }
+
+    // sendMessage(){}
+    // sendRequest(){}
+    // checkInterested(){}
+    // sendInterested(){}
+
+    onend() {
+        if (!this.handshakecomplete) {
+            const err = new Error(`peer ended stream before handshake: ${this.ip}:${this.port}`);
+            err.type = "peer_error";
             this.fail(err);
             return;
         };
-        this.emit("CONNECTION_CLOSED", {
+        this.emit("connection_closed", {
             peer: `${this.ip}:${this.port}`
         });
     }
 
-    onClose() {
-        if (!this.handshakeComplete && !this.finished) {
-            const err = new Error(`Socket closed before handshake: ${this.ip}:${this.port}`);
-            err.type = "SOCKET_ERROR";
+    onclose() {
+        if (!this.handshakecomplete && !this.finished) {
+            const err = new Error(`socket closed before handshake: ${this.ip}:${this.port}`);
+            err.type = "socket_error";
             this.fail(err);
             return;
         }
-        this.emit("SOCKET_CLOSED", {
+        this.emit("socket_closed", {
             peer: `${this.ip}:${this.port}`
         });
     }
 
-    onError(err) {
+    onerror(err) {
         this.fail(err);
     }
 }
