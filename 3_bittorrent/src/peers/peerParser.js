@@ -1,72 +1,67 @@
-import { decode } from "../codec/bencode.js";
-import { Buffer } from "buffer";
-
-
-
 // helper funtion to compress recurring zeros in ipv6 address
-function optimalCompressionLength(ipArray){
+function optimalCompressionLength(ipArray) {
     let bestStart = 0;
     let bestLen = 0;
     let currStart = 0;
     let currLen = 0;
-    
-    for(let idx = 0; idx < ipArray.length; idx++){
-        if( ipArray[idx] === '0' ){
+
+    for (let idx = 0; idx < ipArray.length; idx++) {
+        if (ipArray[idx] === '0') {
             if (currLen === 0) currStart = idx;
-            currLen+=1
+            currLen += 1
         }
-        else{
+        else {
             // use the first longest sequence    
-            if (currLen > bestLen){
+            if (currLen > bestLen) {
                 bestStart = currStart;
-                bestLen = Math.max(bestLen, currLen); 
-            }                
+                bestLen = Math.max(bestLen, currLen);
+            }
             currLen = 0;
         }
     }
     // if the array ends with zero
-    if (currLen > bestLen){
-                bestStart = currStart;
-                bestLen = currLen; 
-        }
+    if (currLen > bestLen) {
+        bestStart = currStart;
+        bestLen = currLen;
+    }
 
     // return the left and right part of the address
-    return {left: bestStart, right: bestLen};
+    return { left: bestStart, right: bestLen };
 }
 
 
 // non-compact -> bencoded list 
 // compact -> raw bytes bencoded string(raw bytes)
 // to prevent deduplication use set for each ip-port set
-export function parseCompactPeers(family, buffer){
+export function parseCompactPeers(family, buffer) {
     let peers = [];
     const seen = new Set();
-    switch(family){
+    switch (family) {
 
         case 4: // 4 + 2 -> 6
 
             // Length validation check
-            if( buffer.length%6 !== 0 ) throw new Error('Peer list is not complete');
+            if (buffer.length % 6 !== 0) throw new Error('Peer list is not complete');
 
-            for(let stride = 0; stride < buffer.length; stride+=6){
+            for (let stride = 0; stride < buffer.length; stride += 6) {
 
                 const ip = [];
                 let port = 0;
-                                
-                for ( let offset = 0; offset < 4; offset++){
+
+                for (let offset = 0; offset < 4; offset++) {
                     ip.push(buffer.readUInt8(stride + offset));
                 }
 
                 port = buffer.readUInt16BE(stride + 4);
-                
+
                 // create a key and push it to seen set for deduplication
                 const ipStr = ip.join('.');
                 const key = `${ipStr}:${port}`;
 
                 // if the key is not present then create add to the set and push to peers else skip
-                if(!seen.has(key)){
+                if (!seen.has(key)) {
                     seen.add(key);
-                    peers.push({ ip: ipStr , port });
+                    peers.push({ ip: ipStr, port });
                 }
             }
 
@@ -75,15 +70,15 @@ export function parseCompactPeers(family, buffer){
         case 6: // 16 + 2 -> 18
 
             // Length validation check
-            if( buffer.length%18 !== 0 ) throw new Error('Peer list is not complete');
+            if (buffer.length % 18 !== 0) throw new Error('Peer list is not complete');
 
-            for(let stride = 0; stride < buffer.length; stride+=18 ){
+            for (let stride = 0; stride < buffer.length; stride += 18) {
 
                 let groups = [];
                 let port = 0;
 
                 // increment offset by 2 since we need groups
-                for ( let offset = 0; offset < 16; offset+=2 ){
+                for (let offset = 0; offset < 16; offset += 2) {
 
                     // since ipv6 uses 16 bit groups(2bytes each)
                     let group = buffer.readUInt16BE(stride + offset);
@@ -100,47 +95,47 @@ export function parseCompactPeers(family, buffer){
                 // TODO: have to learn and get comfortable with regex to do this in a cleaner and efficient way to solve the current problem
                 // for more control I have implemented a loop instead
                 const normalizedIp = groups.map((groupStr) => {
-                // do i need a group array when i am accessing th grp directly
-                        let offset = 0;
-                        let start = -1;
+                    // do i need a group array when i am accessing th grp directly
+                    let offset = 0;
+                    let start = -1;
 
-                        while(offset < groupStr.length){
-                            const val = groupStr[offset];
-                            if ( val !== '0'){
-                                start = offset
-                                break;
-                            }
-
-                            offset +=1;
+                    while (offset < groupStr.length) {
+                        const val = groupStr[offset];
+                        if (val !== '0') {
+                            start = offset
+                            break;
                         }
-                    
+
+                        offset += 1;
+                    }
+
                     // if complete group is of 0 
-                    if( start === -1 ) groupStr = '0'; 
+                    if (start === -1) groupStr = '0';
                     // if some leading zeros or no leading zero exist 
-                    if( start > 0) groupStr = groupStr.slice(start);
+                    if (start > 0) groupStr = groupStr.slice(start);
                     return groupStr;
-                    
+
                 });
 
                 // compress the zeros further in the normalized ip array
                 // the :: for further zero compression can be said to divide the array into two sides the left and right 
-                const {left, right} = optimalCompressionLength(normalizedIp);
+                const { left, right } = optimalCompressionLength(normalizedIp);
 
                 let ipStr;
-                
-                if(right >= 2){
+
+                if (right >= 2) {
                     // create left and right subarray and the join them togather with ::
-                    let leftSide = normalizedIp.slice(0,left);
-                    let rightSide = normalizedIp.slice(left+right, normalizedIp.length);
+                    let leftSide = normalizedIp.slice(0, left);
+                    let rightSide = normalizedIp.slice(left + right, normalizedIp.length);
                     ipStr = leftSide.join(':') + '::' + rightSide.join(':');
                 }
-                else{
+                else {
                     ipStr = normalizedIp.join(':');
                 }
-                
+
 
                 const key = `${ipStr}:${port}`;
-                
+
                 // if the key is not present then create add to the set and push to peers else skip
                 if (!seen.has(key)) {
                     seen.add(key);
@@ -180,24 +175,24 @@ export function parseCompactPeers(family, buffer){
   ]
 }
  */
-export function parseNonCompactPeers(listIR){
+export function parseNonCompactPeers(listIR) {
     let peers = [];
-    
-    for(const peerDict of listIR.value){
+
+    for (const peerDict of listIR.value) {
         let ipStr = null;
         let port = null;
 
-        for(const[key,value] of peerDict.value){
+        for (const [key, value] of peerDict.value) {
             const keyStr = key.toString('utf-8');
-            if(keyStr === 'ip' && value.type === 'String'){
+            if (keyStr === 'ip' && value.type === 'String') {
                 ipStr = value.value.toString('utf-8');
-            } else if(keyStr === 'port' && value.type === 'Integer'){
+            } else if (keyStr === 'port' && value.type === 'Integer') {
                 port = value.value;
             }
         }
 
-        if(ipStr !== null && port !== null){
-            peers.push({ip: ipStr, port } );
+        if (ipStr !== null && port !== null) {
+            peers.push({ ip: ipStr, port });
         }
     }
     return peers;
