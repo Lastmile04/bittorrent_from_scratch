@@ -3,7 +3,7 @@ import EventEmitter, { defaultMaxListeners } from 'node:events';
 // This class can work normally for a proper bittorrent protocl but for MVP i need to expose the parseHandshake result
 // handle the connect and peer object and onError() bugs resolve reject multiple times and no timeout for connect()
 export class BitTorrentPeer extends EventEmitter {
-    constructor(socket, infoHash, peerId, protocolStr, peer, timeout = 10_000) {
+    constructor(socket, infoHash, peerId, protocolStr, peer, pieceCount, timeout = 10_000) {
         super();
         this.socket = socket;
         this.infoHash = infoHash;
@@ -11,6 +11,7 @@ export class BitTorrentPeer extends EventEmitter {
         this.timeout = timeout;
         this.peer = peer;
         this.protocolStr = protocolStr;
+        this.pieceCount = pieceCount;
 
 
         this.ip = peer.ip;
@@ -367,12 +368,12 @@ export class BitTorrentPeer extends EventEmitter {
 
             case "HAVE":
                 this.updatePeerBitfield(msgObj.pieceIndex);
-                if (this.checkInterested()) this.sendInterested();
+                if (this.compareBitfield()) this.sendInterested();
                 break;
 
             case "BITFIELD":
                 this.peerBitfield = msgObj.bitfield;
-                if (this.checkInterested()) this.sendInterested();
+                if (this.compareBitfield()) this.sendInterested();
                 break;
 
             case "REQUEST":
@@ -397,10 +398,16 @@ export class BitTorrentPeer extends EventEmitter {
         }
     }
 
-    // sendMessage(){}
+    // sendMessage(type, payload){}
     // sendRequest(){}
-    // checkInterested(){}
     // sendInterested(){}
+
+    // we compare 
+    compareBitfield() {
+        if (this.bitfield !== null) return true;
+        for ( 
+    }
+
 
     onend() {
         if (!this.handshakecomplete) {
