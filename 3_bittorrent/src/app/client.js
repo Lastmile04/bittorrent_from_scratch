@@ -1,16 +1,24 @@
 import net from 'net';
 import { BitTorrentPeer } from '../transport/BitTorrentPeer.js';
 import { Spinner } from '../presentation/spinner.js';
+import { Buffer } from 'buffer';
 
 // MVP: return first successful peer  
-export async function createClient(list, infoHash, peerId) {
+export async function createClient(list, infoHash, peerId, infoSection) {
     const protocolStr = Buffer.from("BitTorrent protocol");
 
     // Fix: initialize i = 0
     for (let i = 0; i < list.length; i++) {
         const peer = list[i];
         const client = new net.Socket();
-        const btPeer = new BitTorrentPeer(client, infoHash, peerId, protocolStr, peer);
+
+        let pieces;
+        for (const [keyBuff, valueIR] of infoSection) {
+            if (keyBuff.equals(Buffer.from("pieces"))) pieces = valueIR.value;
+        }
+        const pieceCount = pieces.length / 20;
+
+        const btPeer = new BitTorrentPeer(client, infoHash, peerId, protocolStr, peer, pieceCount);
 
         // Pass i + 1 for human-friendly "Attempt 1/50"
         const spinner = new Spinner(peer.ip, peer.port, i + 1, list.length);

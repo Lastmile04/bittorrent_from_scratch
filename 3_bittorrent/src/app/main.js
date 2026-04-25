@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const torrentPath = path.resolve(__dirname, '../../samples/debian.torrent');
-const {buffer, torrentAnnounceList, decodedInfoSection, infoHash, infoHashHex, valid} = parseTorrentFile(torrentPath);
+const { buffer, torrentAnnounceList, decodedInfoSection, infoHash, infoHashHex, valid } = parseTorrentFile(torrentPath);
 
 const peerId = generatePeerId('PC', '0001');
 const left = bytesLeft(decodedInfoSection);
@@ -27,32 +27,32 @@ console.log('left: ', left)
 // Static/identity -> peerID, port
 // Torrnet Specific -> infoHash, left
 // Session/dynamic -> uploaded, downloaded, event, numwant
-const trackerParams = { 
-  infoHash,
-  peerId,
-  port,
-  uploaded: 0,
-  downloaded: 0,
-  left,
-  numwant: 50,
-  event: 'started'
+const trackerParams = {
+    infoHash,
+    peerId,
+    port,
+    uploaded: 0,
+    downloaded: 0,
+    left,
+    numwant: 50,
+    event: 'started'
 }
 
-const result =  await urlDispatcher(torrentAnnounceList, trackerParams);
+const result = await urlDispatcher(torrentAnnounceList, trackerParams);
 console.log(`Peers: ${result.peers.length}`);
 console.log(result.peers);
-console.log(result.peerStats); 
+console.log(result.peerStats);
 
 // In this MVP I don't need to server behaviour and only need the client implemetation
 // server implementation will be in future updates 
 // const server = net.createServer((socket)=>{
 //     console.log('Incoming peer connection:', socket.remoteAddress, socket.remotePort);
-    
+
 //     const btPeer = new BitTorrentPeer(socket, infoHash, peerId);
 // });
 
 const peerList = result.peers;
-const handshake = await createClient(peerList, infoHash, peerId);
+const handshake = await createClient(peerList, infoHash, peerId, decodedInfoSection);
 
 
 
