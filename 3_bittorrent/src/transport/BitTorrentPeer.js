@@ -171,7 +171,7 @@ export class BitTorrentPeer extends EventEmitter {
 
         while (this.buffer.length > 0) {
             //  --- handshake phase ---
-            if (!this.handshakecomplete) {
+            if (!this.handshakeComplete) {
 
                 if (this.buffer.length < 1) break;
 
@@ -186,7 +186,7 @@ export class BitTorrentPeer extends EventEmitter {
                     // parse and verify
                     parsed = this.parsehandshake();
                     this.emit("HANDSHAKE_SUCCESS", parsed);
-                    this.handshakecomplete = true;
+                    this.handshakeComplete = true;
                 } catch (err) {
                     this.fail(err);
                     return;
@@ -214,7 +214,7 @@ export class BitTorrentPeer extends EventEmitter {
                     const msgPayload = this.buffer.subarray(0, msgLen);
                     this.buffer = this.buffer.slice(msgLen);
                     const msg = this.parseMsg(msgPayload);
-                    handleMsg(msg);
+                    this.handleMsg(msg);
                 }
                 catch (err) {
                     this.fail(err);
@@ -227,7 +227,7 @@ export class BitTorrentPeer extends EventEmitter {
     // parese the response handshake
     parsehandshake() {
 
-        const expectedpstrlen = this.protocolstr.length;
+        const expectedpstrlen = this.protocolStr.length;
         const receivedpstrlen = this.buffer[0];
 
         // check protocol string length
@@ -246,7 +246,7 @@ export class BitTorrentPeer extends EventEmitter {
         const protocol = handshake.subarray(protocolstart, protocolend);
 
         // check protocol string
-        if (!protocol.equals(this.protocolstr)) {
+        if (!protocol.equals(this.protocolStr)) {
             const err = new Error('protocol mismatch');
             err.type = "protocol_mismatch";
             throw err;
@@ -345,6 +345,7 @@ export class BitTorrentPeer extends EventEmitter {
     }
 
     handleMsg(msgObj) {
+        let pieceIndex;
         switch (msgObj.type) {
             case "CHOKE":
                 this.peerChoking = true;
@@ -368,17 +369,19 @@ export class BitTorrentPeer extends EventEmitter {
 
             case "HAVE":
                 this.updatePeerBitfield(msgObj.pieceIndex);
-                if (this.compareBitfield()) this.sendInterested();
+                pieceIndex = this.findNeeded();
+                if (pieceIndex !== null) this.sendInterested();
                 break;
 
             case "BITFIELD":
                 this.peerBitfield = msgObj.bitfield;
-                if (this.compareBitfield()) this.sendInterested();
+                pieceIndex = this.findNeeded();
+                if (pieceIndex !== null) this.sendInterested();
                 break;
 
             case "REQUEST":
                 // NOTE: in future the request will be pushed to the received requests array
-                // NOTE: In Future TODO: make request working
+                // NOTE: In Future TODO: make request working by implementing rarest first algorithm 
                 this.incomingRequests.push(msgObj.request);
                 break;
 
@@ -390,7 +393,7 @@ export class BitTorrentPeer extends EventEmitter {
                 break;
 
             case "CANCEL":
-                // NOTE: Pending for future
+                // NOTE: Not required for this MVP
                 break;
 
             default:
@@ -402,15 +405,28 @@ export class BitTorrentPeer extends EventEmitter {
     // sendRequest(){}
     // sendInterested(){}
 
-    // we compare 
-    compareBitfield() {
-        if (this.bitfield !== null) return true;
-        for ( 
+    findNeeded() {
+        // NOTE: For MVP's sake we'll return as soon as we have a valid pieceCount instead of collecting all the valid pieceCounts in peer Bitfield
+        for (let byteIdx = 0; byteIdx < this.peerBitfield.length; byteIdx++) {
+            const peerByte = this.peerBitfield[byteIdx];
+            const myByte = this.bitfield ? this.bitfield[byteIdx] : 0;
+            // Since Bits are form 7->0
+            for (let bit = 7; bit >= 0; bit--) {
+                const pieceIndex = byteIdx * 8 + (7 - bit);
+                if (pieceIndex >= this.pieceCount) break;
+
+                // check the piece using bit mask
+                const peerHas = (peerByte >> bit) & 1;
+                const iHave = (myByte >> bit) & 1;
+                if (peerHas && !iHave) return pieceIndex;
+            }
+        }
+        return null;
     }
 
 
     onend() {
-        if (!this.handshakecomplete) {
+        if (!this.handshakeComplete) {
             const err = new Error(`peer ended stream before handshake: ${this.ip}:${this.port}`);
             err.type = "peer_error";
             this.fail(err);
@@ -422,7 +438,7 @@ export class BitTorrentPeer extends EventEmitter {
     }
 
     onclose() {
-        if (!this.handshakecomplete && !this.finished) {
+        if (!this.handshakeComplete && !this.finished) {
             const err = new Error(`socket closed before handshake: ${this.ip}:${this.port}`);
             err.type = "socket_error";
             this.fail(err);
