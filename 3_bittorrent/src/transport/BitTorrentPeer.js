@@ -12,7 +12,7 @@ export class BitTorrentPeer extends EventEmitter {
         this.peer = peer;
         this.protocolStr = protocolStr;
         this.pieceCount = pieceCount;
-
+        this.targetPieceIdx = null;
 
         this.ip = peer.ip;
         this.port = peer.port;
@@ -345,7 +345,7 @@ export class BitTorrentPeer extends EventEmitter {
     }
 
     handleMsg(msgObj) {
-        let pieceIndex;
+
         switch (msgObj.type) {
             case "CHOKE":
                 this.peerChoking = true;
@@ -369,14 +369,26 @@ export class BitTorrentPeer extends EventEmitter {
 
             case "HAVE":
                 this.updatePeerBitfield(msgObj.pieceIndex);
-                pieceIndex = this.findNeeded();
-                if (pieceIndex !== null) this.sendInterested();
+
+                if (this.targetPieceIdx === null) {
+                    const pieceIdx = this.findNeeded();
+                    if (pieceIdx !== null) {
+                        this.targetPieceIdx = pieceIdx;
+                        this.sendInterested();
+                    }
+                }
                 break;
 
             case "BITFIELD":
                 this.peerBitfield = msgObj.bitfield;
-                pieceIndex = this.findNeeded();
-                if (pieceIndex !== null) this.sendInterested();
+
+                if (this.targetPieceIdx === null) {
+                    const pieceIdx = this.findNeeded();
+                    if (pieceIdx !== null) {
+                        this.targetPieceIdx = pieceIdx;
+                        this.sendInterested();
+                    }
+                }
                 break;
 
             case "REQUEST":
@@ -403,7 +415,28 @@ export class BitTorrentPeer extends EventEmitter {
 
     // sendMessage(type, payload){}
     // sendRequest(){}
-    // sendInterested(){}
+    // since using fast fail approach there's no need for handling this.interested = true if socket closes immediately wihtout peer receiving the message
+    sendInterested() {
+        if (this.interested) return;
+
+        const interestedMsg = Buffer.alloc(5);
+        interestedMsg.writeUInt32BE(1, 0);
+        interestedMsg.writeUInt8(2, 4);
+
+        try {
+            this.socket.write(interestedMsg);
+            this.interested = true;
+            this.emit('INTERESTED_QUEUED');
+
+        } catch (err) {
+            const error = {
+                message: `Attempt to send Interested message to peer failed | ${err.message}`,
+                type: 'INTERESTED_FAILED'
+            }
+            this.fail(error);
+
+        }
+    }
 
     findNeeded() {
         // NOTE: For MVP's sake we'll return as soon as we have a valid pieceCount instead of collecting all the valid pieceCounts in peer Bitfield
