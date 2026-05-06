@@ -3,7 +3,7 @@ import EventEmitter, { defaultMaxListeners } from 'node:events';
 // This class can work normally for a proper bittorrent protocl but for MVP i need to expose the parseHandshake result
 // handle the connect and peer object and onError() bugs resolve reject multiple times and no timeout for connect()
 export class BitTorrentPeer extends EventEmitter {
-    constructor(socket, infoHash, peerId, protocolStr, peer, pieceCount, timeout = 10_000) {
+    constructor(socket, infoHash, peerId, protocolStr, peer, pieceCount, pieceLength, timeout = 10_000) {
         super();
         this.socket = socket;
         this.infoHash = infoHash;
@@ -12,19 +12,22 @@ export class BitTorrentPeer extends EventEmitter {
         this.peer = peer;
         this.protocolStr = protocolStr;
         this.pieceCount = pieceCount;
+        this.pieceLength = pieceLength;
         this.targetPieceIdx = null;
+        this.downloadedBytes = 0;
 
         this.ip = peer.ip;
         this.port = peer.port;
 
 
         // protocol state
+        // NOTE: Since in MVP we're not really uploading any pieces so client will stay choked  
         this.choked = true;
         this.interested = false;
         this.bitfield = null;
         // Some pre-defined instances for later
         this.pendingRequests = [];
-        this.receivedPieces = {};
+        this.pieceBuffer = Buffer.alloc(0);
         this.incomingRequests = [];
 
         this.peerChoking = true;
@@ -33,6 +36,7 @@ export class BitTorrentPeer extends EventEmitter {
 
         this.buffer = Buffer.alloc(0);
         this.handshakeComplete = false;
+        this.defaultBlockSize = 16 * 1024;
 
         // task specific instances 
         this.remotePeerId = null;
@@ -355,7 +359,9 @@ export class BitTorrentPeer extends EventEmitter {
 
             case "UNCHOKE":
                 this.peerChoking = false;
-                if (this.interested) this.sendRequests();
+                // NOTE: Hard coding block Size only for MVP for proper implementation use some other way since can't hardcode when the block size might be less
+                const blockSize = 16 * 1024;
+                if (this.interested) this.sendRequest(blockSize);
                 // start sending requests
                 break;
 
@@ -399,9 +405,35 @@ export class BitTorrentPeer extends EventEmitter {
 
             case "PIECE":
                 const { index, begin, block } = msgObj.piece;
+                // NOTE: Because of the current status as MVP, to maintain correctness the constraints are a bit harsh 
+                if (index !== this.targetPieceIdx || this.downloadedBytes !== begin) {
+                    const err = {
+                        message: "Wrong peer piece index or begin offset",
+                        type: "PEER_BLOCK_MISMATCH"
+                    }
+                    this.fail(err);
+                }
 
-                if (!this.receivedPieces[index]) this.receivedPieces[index] = [];
-                this.receivedPieces[index].push({ begin, block });
+                let remainingBytes = this.pieceLength - this.downloadedBytes;
+
+                if (block.length > remainingBytes) {
+                    const err = {
+                        message: "Length of received block form peer exceeds required bytes",
+                        type: "MALFORMED_RESPONSE"
+                    }
+                    this.fail(err);
+                }
+                // copy from source               
+                block.copy(this.pieceBuffer, begin);
+                this.downloadedBytes += block.length;
+
+                // recalculate remaining bytes since we updated the downloadedBytes
+                remainingBytes = this.pieceLength - this.downloadedBytes;
+
+                const currBlockSize = remainingBytes > this.defaultBlockSize ? this.defaultBlockSize : remainingBytes;
+                if (currBlockSize > 0) this.sendRequest(currBlockSize);
+                else this.verifyPieceHash();
+
                 break;
 
             case "CANCEL":
@@ -413,8 +445,27 @@ export class BitTorrentPeer extends EventEmitter {
         }
     }
 
+    varifyPieceHash() {
+
+    }
     // sendMessage(type, payload){}
-    // sendRequest(){}
+    sendRequest(blockSize) {
+        if (this.peerChoking || !this.interested) return;
+
+        let begin = this.downloadedBytes;
+        const requestMsg = Buffer.alloc(17);
+
+        requestMsg.writeUInt32BE(13, 0);                  // payload length
+        requestMsg.writeUInt8(6, 4);                      // msgID 
+        //payload
+        requestMsg.writeUInt32BE(this.targetPieceIdx, 5); // index
+        requestMsg.writeUInt32BE(begin, 9);               // begin
+        requestMsg.writeUInt32BE(blockSize, 13);          // block length
+
+        this.socket.write(requestMsg);
+        this.emit("REQUEST_SENT");
+    }
+
     // since using fast fail approach there's no need for handling this.interested = true if socket closes immediately wihtout peer receiving the message
     sendInterested() {
         if (this.interested) return;

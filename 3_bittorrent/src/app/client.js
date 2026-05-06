@@ -12,13 +12,15 @@ export async function createClient(list, infoHash, peerId, infoSection) {
         const peer = list[i];
         const client = new net.Socket();
 
+        let pieceLength;
         let pieces;
         for (const [keyBuff, valueIR] of infoSection) {
             if (keyBuff.equals(Buffer.from("pieces"))) pieces = valueIR.value;
+            if (keyBuff.equals(Buffer.from("piece length"))) pieceLength = valueIR.value;
         }
         const pieceCount = pieces.length / 20;
 
-        const btPeer = new BitTorrentPeer(client, infoHash, peerId, protocolStr, peer, pieceCount);
+        const btPeer = new BitTorrentPeer(client, infoHash, peerId, protocolStr, peer, pieceCount, pieceLength);
 
         // Pass i + 1 for human-friendly "Attempt 1/50"
         const spinner = new Spinner(peer.ip, peer.port, i + 1, list.length);
