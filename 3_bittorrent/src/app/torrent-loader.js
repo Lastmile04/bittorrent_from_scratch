@@ -3,7 +3,7 @@ import { validateBencode } from '../codec/validator.js';
 import { getInfoSection } from '../identity/InfoByte.js';
 import { computeInfoHash } from '../identity/infoHash.js';
 import { decode } from '../codec/bencode.js';
-import { getAnnounce } from './torrent-metadata.js';
+import { torrentMetadataExtraction } from './torrent-metadata.js';
 
 export function parseTorrentFile(torrentPath) {
     try {
@@ -25,25 +25,15 @@ export function parseTorrentFile(torrentPath) {
         console.log('Info Hash (hex)->', infoHash.toString('hex'));
 
         const decodedIR = decode(buffer, 0).value;
-        let decodedInfoSection;
 
-        for (let [keyBuffer, valueIR] of decodedIR.value) {
-            if (keyBuffer.equals(Buffer.from('info'))) {
-                decodedInfoSection = valueIR;
-            }
-        }
-
-        const torrentAnnounceList = getAnnounce(decodedIR);
+        const torrentMetadata = torrentMetadataExtraction(decodedIR);
         // const torrentAnnounceList = [['udp://tracker.opentrackr.org:1337', 'udp://tracker.openbittorrent.com:6969', 'udp://open.stealth.si:80']]
 
         // Return important values
         return {
-            buffer,           // Full torrent file buffer
-            torrentAnnounceList,      // AnnounceUrl extract
-            decodedInfoSection,
-            infoHash,         // Buffer (20 bytes)
-            infoHashHex: infoHash.toString('hex'),  // Hex string for display
-            valid: true,
+           // buffer,           // Full torrent file buffer
+            ...torrentMetadata, 
+            infoHash,         // Buffer (20 bytes) 
         };
 
     } catch (error) {

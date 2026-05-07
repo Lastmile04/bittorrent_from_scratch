@@ -4,7 +4,7 @@ import { Spinner } from '../presentation/spinner.js';
 import { Buffer } from 'buffer';
 
 // MVP: return first successful peer  
-export async function createClient(list, infoHash, peerId, infoSection) {
+export async function createClient(list, peerId, torrentMeta) {
     const protocolStr = Buffer.from("BitTorrent protocol");
 
     // Fix: initialize i = 0
@@ -12,15 +12,7 @@ export async function createClient(list, infoHash, peerId, infoSection) {
         const peer = list[i];
         const client = new net.Socket();
 
-        let pieceLength;
-        let pieces;
-        for (const [keyBuff, valueIR] of infoSection) {
-            if (keyBuff.equals(Buffer.from("pieces"))) pieces = valueIR.value;
-            if (keyBuff.equals(Buffer.from("piece length"))) pieceLength = valueIR.value;
-        }
-        const pieceCount = pieces.length / 20;
-
-        const btPeer = new BitTorrentPeer(client, infoHash, peerId, protocolStr, peer, pieceCount, pieceLength);
+        const btPeer = new BitTorrentPeer(client, peerId, protocolStr, peer, torrentMeta);
 
         // Pass i + 1 for human-friendly "Attempt 1/50"
         const spinner = new Spinner(peer.ip, peer.port, i + 1, list.length);

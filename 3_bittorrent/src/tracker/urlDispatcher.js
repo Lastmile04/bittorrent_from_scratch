@@ -18,16 +18,16 @@ export async function urlDispatcher(announceList, params) {
 
     // a helper dictionary for handling protocols
     const protocolHandler = {
-        'udp:' : udpPeer,
-        'http:' : httpPeers,
-        'https:' : httpPeers
+        'udp:': udpPeer,
+        'http:': httpPeers,
+        'https:': httpPeers
     }
-    
+
     // loop through each tier
-    for(let tier = 0; tier < announceList.length; tier++){
-        
+    for (let tier = 0; tier < announceList.length; tier++) {
+
         // loop through each url inside that tier
-        for(let trackerIdx = 0; trackerIdx < announceList[tier].length; trackerIdx++){
+        for (let trackerIdx = 0; trackerIdx < announceList[tier].length; trackerIdx++) {
             let trackerUrl = "";
             try {
                 trackerUrl = announceList[tier][trackerIdx];
@@ -35,12 +35,12 @@ export async function urlDispatcher(announceList, params) {
                 const urlObj = new URL(trackerUrl);
                 const handler = protocolHandler[urlObj.protocol];
 
-                if(handler){
+                if (handler) {
                     const res = await callTracker(handler, urlObj, trackerUrl, params);
-                    if(res.peers && res.peers.length) return res;
+                    if (res.peers && res.peers.length) return res;
                 }
-                
-                
+
+
             } catch (e) {
                 console.warn(`Tracker failed: ${trackerUrl}`, e.message);
             }

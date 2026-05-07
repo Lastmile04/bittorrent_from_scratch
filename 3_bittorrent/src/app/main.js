@@ -4,7 +4,6 @@ import { createClient } from './client.js';
 import { generatePeerId } from '../identity/peerId.js';
 import { parseTorrentFile } from './torrent-loader.js';
 import { urlDispatcher } from '../tracker/urlDispatcher.js';
-import { bytesLeft } from '../tracker/bytesLeft.js'
 import { fileURLToPath } from 'url';
 import path from 'path';
 
@@ -14,13 +13,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const torrentPath = path.resolve(__dirname, '../../samples/debian.torrent');
-const { buffer, torrentAnnounceList, decodedInfoSection, infoHash, infoHashHex, valid } = parseTorrentFile(torrentPath);
+const torrentMeta = parseTorrentFile(torrentPath);
 
 const peerId = generatePeerId('PC', '0001');
-const left = bytesLeft(decodedInfoSection);
+const left = torrentMeta.totalLength;
 
-console.log('trackers:', torrentAnnounceList);
-console.log('infoHash:', infoHash);
+console.log('trackers:', torrentMeta.announceList);
+console.log('infoHash:', torrentMeta.infoHash);
 console.log('peerId:', peerId);
 console.log('left: ', left)
 
@@ -28,7 +27,7 @@ console.log('left: ', left)
 // Torrnet Specific -> infoHash, left
 // Session/dynamic -> uploaded, downloaded, event, numwant
 const trackerParams = {
-    infoHash,
+    infoHash: torrentMeta.infoHash,
     peerId,
     port,
     uploaded: 0,
@@ -38,7 +37,7 @@ const trackerParams = {
     event: 'started'
 }
 
-const result = await urlDispatcher(torrentAnnounceList, trackerParams);
+const result = await urlDispatcher(torrentMeta.announceList, trackerParams);
 console.log(`Peers: ${result.peers.length}`);
 console.log(result.peers);
 console.log(result.peerStats);
@@ -52,10 +51,7 @@ console.log(result.peerStats);
 // });
 
 const peerList = result.peers;
-const handshake = await createClient(peerList, infoHash, peerId, decodedInfoSection);
-
-
-
+const handshake = await createClient(peerList, peerId, torrentMeta);
 
 
 // server.listen(port, '0.0.0.0', () => { // Bind to all interfaces
