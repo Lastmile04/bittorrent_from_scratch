@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { validateBencode } from '../codec/validator.js';
 import { getInfoSection } from '../identity/InfoByte.js';
-import { computeInfoHash } from '../identity/infoHash.js';
+import { computeSha1Hash } from '../identity/computeHash.js';
 import { decode } from '../codec/bencode.js';
 import { torrentMetadataExtraction } from './torrent-metadata.js';
 
@@ -21,7 +21,7 @@ export function parseTorrentFile(torrentPath) {
         console.log('End offset->', infoSection.end);
 
         // Compute info hash
-        const infoHash = computeInfoHash(infoSection.raw);
+        const infoHash = computeSha1Hash(infoSection.raw);
         console.log('Info Hash (hex)->', infoHash.toString('hex'));
 
         const decodedIR = decode(buffer, 0).value;

@@ -1,5 +1,6 @@
 // NOTE: Currently this is not a full fledged peer, this class is nore of a leecher(downloader), more functionality will be added in the future to make it into a complete peer that can leech(download) as well as seed(upload)
 import EventEmitter, { defaultMaxListeners } from 'node:events';
+import { computeSha1Hash } from '../identity/computeHash.js';
 // This class can work normally for a proper bittorrent protocl but for MVP i need to expose the parseHandshake result
 // handle the connect and peer object and onError() bugs resolve reject multiple times and no timeout for connect()
 export class BitTorrentPeer extends EventEmitter {
@@ -13,11 +14,12 @@ export class BitTorrentPeer extends EventEmitter {
         this.protocolStr = protocolStr;
         this.pieceCount = torrentMeta.pieceCount;
         this.pieceLength = torrentMeta.pieceLength;
-        this.pieceHashes = torrentMeta.pieceHashses;
+        this.pieceHashes = torrentMeta.pieceHashes;
         this.lastPieceLength = torrentMeta.lastPieceLength;
         this.totalLength = torrentMeta.totalLength;
         this.targetPieceIdx = null;
         this.downloadedBytes = 0;
+
 
         this.ip = peer.ip;
         this.port = peer.port;
@@ -30,7 +32,6 @@ export class BitTorrentPeer extends EventEmitter {
         this.bitfield = null;
         // Some pre-defined instances for later
         this.pendingRequests = [];
-        this.pieceBuffer = Buffer.alloc(0);
         this.incomingRequests = [];
 
         this.peerChoking = true;
@@ -234,23 +235,23 @@ export class BitTorrentPeer extends EventEmitter {
     // parese the response handshake
     parsehandshake() {
 
-        const expectedpstrlen = this.protocolStr.length;
-        const receivedpstrlen = this.buffer[0];
+        const expectedPstrLen = this.protocolStr.length;
+        const receivedPstrLen = this.buffer[0];
 
         // check protocol string length
-        if (receivedpstrlen !== expectedpstrlen) {
+        if (receivedPstrLen !== expectedPstrLen) {
             const err = new Error('protocol length mismatch');
             err.type = "protocol_mismatch";
             throw err;
         }
 
-        const handshakestart = 0;
-        const handshakeend = expectedpstrlen + 49;
-        const handshake = this.buffer.subarray(handshakestart, handshakeend);
+        const handshakeStart = 0;
+        const handshakeEnd = expectedPstrLen + 49;
+        const handshake = this.buffer.subarray(handshakeStart, handshakeEnd);
 
-        const protocolstart = 1
-        const protocolend = 1 + expectedpstrlen;
-        const protocol = handshake.subarray(protocolstart, protocolend);
+        const protocolStart = 1
+        const protocolEnd = 1 + expectedPstrLen;
+        const protocol = handshake.subarray(protocolStart, protocolEnd);
 
         // check protocol string
         if (!protocol.equals(this.protocolStr)) {
@@ -260,35 +261,35 @@ export class BitTorrentPeer extends EventEmitter {
 
         }
 
-        const reservedstart = protocolend;
-        const reservedend = reservedstart + 8;
-        const infohashstart = reservedend;
-        const infohashend = infohashstart + 20;
-        const peeridstart = infohashend;
-        const peeridend = peeridstart + 20;
-        const totalhandshakelength = peeridend;
+        const reservedStart = protocolEnd;
+        const reservedEnd = reservedStart + 8;
+        const infoHashStart = reservedEnd;
+        const infoHashEnd = infoHashStart + 20;
+        const peeridStart = infoHashEnd;
+        const peeridEnd = peeridStart + 20;
+        const totalHandshakeLength = peeridEnd;
 
-        const remoteinfohash = handshake.subarray(infohashstart, infohashend);
-        const remotepeerid = handshake.subarray(peeridstart, peeridend);
+        const remoteInfoHash = handshake.subarray(infoHashStart, infoHashEnd);
+        const remotePeerId = handshake.subarray(peeridStart, peeridEnd);
 
 
         // check infohash
-        if (!remoteinfohash.equals(this.infohash)) {
-            const err = new Error('infohash mismatch');
-            err.type = "infohash_mismatch";
+        if (!remoteInfoHash.equals(this.infoHash)) {
+            const err = new Error('infoHash mismatch');
+            err.type = "infoHash_mismatch";
             throw err;
         }
 
-        this.remotepeerid = Buffer.from(remotepeerid);
+        this.remotePeerId = Buffer.from(remotePeerId);
 
         return {
             peer: this.peer,
             ip: this.ip,
             port: this.port,
-            remotepeerid,
-            remotepeeridhex: remotepeerid.toString('hex'),
+            remotePeerId,
+            remotePeerIdHex: remotePeerId.toString('hex'),
             handshake,
-            bytesconsumed: totalhandshakelength,
+            bytesConsumed: totalHandshakeLength,
         };
     }
 
@@ -377,12 +378,15 @@ export class BitTorrentPeer extends EventEmitter {
                 break;
 
             case "HAVE":
-                this.updatePeerBitfield(msgObj.pieceIndex);
+                //this.updatePeerBitfield(msgObj.pieceIndex);
 
                 if (this.targetPieceIdx === null) {
                     const pieceIdx = this.findNeeded();
                     if (pieceIdx !== null) {
                         this.targetPieceIdx = pieceIdx;
+                        // make sure to always derive calculation like these 
+                        this.currentPieceLength = Math.min(this.pieceLength, (this.totalLength - (this.targetPieceIdx * this.pieceLength)));
+                        this.pieceBuffer = Buffer.alloc(this.currentPieceLength);
                         this.sendInterested();
                     }
                 }
@@ -395,6 +399,8 @@ export class BitTorrentPeer extends EventEmitter {
                     const pieceIdx = this.findNeeded();
                     if (pieceIdx !== null) {
                         this.targetPieceIdx = pieceIdx;
+                        this.currentPieceLength = Math.min(this.pieceLength, (this.totalLength - (this.targetPieceIdx * this.pieceLength)));
+                        this.pieceBuffer = Buffer.alloc(this.currentPieceLength);
                         this.sendInterested();
                     }
                 }
@@ -408,34 +414,42 @@ export class BitTorrentPeer extends EventEmitter {
 
             case "PIECE":
                 const { index, begin, block } = msgObj.piece;
-                // NOTE: Because of the current status as MVP, to maintain correctness the constraints are a bit harsh 
-                if (index !== this.targetPieceIdx || this.downloadedBytes !== begin) {
-                    const err = {
-                        message: "Wrong peer piece index or begin offset",
+                // NOTE: Because of the current status as MVP, to maintain correctness the constraints are a bit harsh
+                if (this.targetPieceIdx !== index || begin !== this.downloadedBytes) {
+                    return this.fail({
+                        message: `Offset mismatch. Expected ${this.downloadedBytes}, got ${begin}`,
                         type: "PEER_BLOCK_MISMATCH"
-                    }
-                    this.fail(err);
+                    });                    
                 }
 
-                let remainingBytes = this.pieceLength - this.downloadedBytes;
-
+                let remainingBytes = this.currentPieceLength - this.downloadedBytes;
                 if (block.length > remainingBytes) {
-                    const err = {
-                        message: "Length of received block form peer exceeds required bytes",
+                    this.fail({
+                        message: "Block exceeds remaining bytes for this piece",
                         type: "MALFORMED_RESPONSE"
-                    }
-                    this.fail(err);
+                    });
+                    return;
                 }
+
                 // copy from source               
                 block.copy(this.pieceBuffer, begin);
                 this.downloadedBytes += block.length;
 
                 // recalculate remaining bytes since we updated the downloadedBytes
-                remainingBytes = this.pieceLength - this.downloadedBytes;
+                remainingBytes = this.currentPieceLength - this.downloadedBytes;
 
-                const currBlockSize = remainingBytes > this.defaultBlockSize ? this.defaultBlockSize : remainingBytes;
-                if (currBlockSize > 0) this.sendRequest(currBlockSize);
-                else this.verifyPieceHash();
+                if (remainingBytes > 0) {
+                    const nextBlockSize = Math.min(remainingBytes, this.defaultBlockSize);
+                    this.sendRequest(nextBlockSize);
+                }
+                else if (this.downloadedBytes === this.currentPieceLength) {
+                    if (this.verifyPieceHash()){
+                        this.emit("PIECE_DOWNLOADED", { index: this.targetPieceIdx });
+                        this.pieceBuffer = null;
+                        this.targetPieceIdx = null;
+                    }
+                    else this.fail({ message: "Invalid hash", type: "HASH_FAIL" });
+                }
 
                 break;
 
@@ -448,8 +462,11 @@ export class BitTorrentPeer extends EventEmitter {
         }
     }
 
-    varifyPieceHash() {
+    verifyPieceHash() {
+        const idx = this.targetPieceIdx;
+        const pieceHash = computeSha1Hash(this.pieceBuffer);
 
+        return this.pieceHashes[idx].equals(pieceHash);
     }
     // sendMessage(type, payload){}
     sendRequest(blockSize) {
@@ -512,7 +529,7 @@ export class BitTorrentPeer extends EventEmitter {
     }
 
 
-    onend() {
+    onEnd() {
         if (!this.handshakeComplete) {
             const err = new Error(`peer ended stream before handshake: ${this.ip}:${this.port}`);
             err.type = "peer_error";
@@ -524,7 +541,7 @@ export class BitTorrentPeer extends EventEmitter {
         });
     }
 
-    onclose() {
+    onClose() {
         if (!this.handshakeComplete && !this.finished) {
             const err = new Error(`socket closed before handshake: ${this.ip}:${this.port}`);
             err.type = "socket_error";
@@ -536,7 +553,7 @@ export class BitTorrentPeer extends EventEmitter {
         });
     }
 
-    onerror(err) {
+    onError(err) {
         this.fail(err);
     }
 }
