@@ -2,6 +2,7 @@ import net from 'net';
 import { BitTorrentPeer } from '../transport/BitTorrentPeer.js';
 import { Spinner } from '../presentation/spinner.js';
 import { Buffer } from 'buffer';
+import { stdout } from 'process';
 
 // MVP: return first successful peer  
 export async function createClient(list, peerId, torrentMeta) {
@@ -20,7 +21,6 @@ export async function createClient(list, peerId, torrentMeta) {
         const cleanup = bindPeerToSpinner(btPeer, spinner);
 
         try {
-            // Await the handshake 
             const result = await btPeer.connect();
 
             cleanup();
@@ -29,7 +29,7 @@ export async function createClient(list, peerId, torrentMeta) {
             return result;
 
         } catch (err) {
-            // console.log("FAIL:", err.type, err.message);
+            console.log("FAIL:", err.type, err.message);
             cleanup();
             client.destroy();
 
@@ -52,14 +52,44 @@ function bindPeerToSpinner(btPeer, spinner) {
         console.log("CONNECTING EVENT FIRED");
         spinner.onConnecting();
     };
-    const onSuccess = () => spinner.onSuccess('success');
+    const onSuccess = (data) => spinner.onSuccess(data);
+    const onHandshakeSuccess = () => spinner.onHandshakeSuccess('success');
     const onFail = (err) => spinner.onFail(err);
 
     btPeer.on('CONNECTING', onConnecting);
-    btPeer.on('HANDSHAKE_SUCCESS', onSuccess);
-    btPeer.on('CONNECT_SUCCESS', () => { });
-    btPeer.on("CONNECTION_CLOSED", () => { });
-    btPeer.on("SOCKET_CLOSED", () => { });
+    btPeer.on('HANDSHAKE_SUCCESS', onHandshakeSuccess);
+
+    btPeer.on('CONNECT_SUCCESS', (data) => { console.log(`Peer ${data.peer} connection successsful`) });
+
+    btPeer.on("CONNECTION_CLOSED", (data) => { console.log(`Peer ${data.peer} connection closed`) });
+
+    btPeer.on("SOCKET_CLOSED", (data) => { console.log(`Peer ${data.peer} socket closed`) });
+
+    btPeer.on("BLOCK_RECEIVED", (payload) => {
+        process.stdout.write(
+            `\nIndex: ${payload.index}
+        \nBegin: ${payload.begin}
+        \nLength: ${payload.blockLength}`
+        )
+    });
+
+    btPeer.on("PROGRESS", (data) => {
+        process.stdout.write(
+            `\n PROGRESS: ${data}`
+        )
+    });
+
+    btPeer.on("REQUEST_SENT", (payload) => {
+        process.stdout.write(
+            `\nIndex: ${payload.index}
+            \n Begin: ${payload.begin}
+            \n Length: ${payload.length}`
+        )
+    });
+
+    btPeer.on("PEER_UNCHOKE", () => { console.log("Peer Unchoke") });
+    btPeer.on("PIECE_DOWNLOAD_SUCCESS", (data) => onSuccess(data));
+
 
     btPeer.on('ERROR', onFail);
     btPeer.on("PEER_ERROR", onFail);
@@ -67,7 +97,8 @@ function bindPeerToSpinner(btPeer, spinner) {
 
     return () => {
         btPeer.off('CONNECTING', onConnecting);
-        btPeer.off('HANDSHAKE_SUCCESS', onSuccess);
+        btPeer.off('HANDSHAKE_SUCCESS', onHandshakeSuccess);
         btPeer.off('ERROR', onFail);
+        btPeer.off("PIECE_DOWNLOAD_SUCCESS", onSuccess);
     }
 }

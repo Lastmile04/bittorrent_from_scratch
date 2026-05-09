@@ -42,17 +42,16 @@ export class Spinner {
 
         const symbol = status === 'success' ? '✔' : '✖';
         // Clear the line one last time so the final message is clean
-        process.stdout.write(`\r\x1B[2K${symbol} Peer ${this.ip}:${this.port} - ${status.toUpperCase()}\n`);
-
-
+        process.stdout.write(`\r\x1B[2K${symbol} Peer ${this.ip}:${this.port} - ${status.toUpperCase()} \n`);
     }
 
     onConnecting() {
         this.start(); // show animated "Trying ..."
     }
 
-    onSuccess() {
+    onSuccess(data) {
         this.stop('success');
+        process.stdout.write(`Piece Downloaded Successfully | index: ${data.index} `);
     }
 
     onFail(err) {
@@ -60,4 +59,9 @@ export class Spinner {
         process.stdout.write(`      Reason: ${err.message}\n`);
     }
 
+    onHandshakeSuccess(status) {
+        const symbol = status === 'Handshake success' ? '✔' : '✖';
+        // Clear the line one last time so the final message is clean
+        process.stdout.write(`\r\x1B[2K${symbol} Peer ${this.ip}:${this.port} - ${status.toUpperCase()}\n`);
+    }
 }
