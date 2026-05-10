@@ -12,17 +12,17 @@ export function parseTorrentFile(torrentPath) {
 
         // Validate bencode structure
         validateBencode(buffer);
-        console.log('Torrent validated successfully');
+        console.log('📦 Torrent metadata validated');
 
         // Extract info section
         const infoSection = getInfoSection(buffer);
-        console.log('Info section extracted');
-        console.log('Start offset->', infoSection.start);
-        console.log('End offset->', infoSection.end);
+        // console.log('Info section extracted');
+        // console.log('Start offset->', infoSection.start);
+        // console.log('End offset->', infoSection.end);
 
         // Compute info hash
         const infoHash = computeSha1Hash(infoSection.raw);
-        console.log('Info Hash (hex)->', infoHash.toString('hex'));
+        console.log('🔑 Info hash generated (hex)->', infoHash.toString('hex'));
 
         const decodedIR = decode(buffer, 0).value;
 
@@ -31,13 +31,13 @@ export function parseTorrentFile(torrentPath) {
 
         // Return important values
         return {
-           // buffer,           // Full torrent file buffer
-            ...torrentMetadata, 
+            // buffer,           // Full torrent file buffer
+            ...torrentMetadata,
             infoHash,         // Buffer (20 bytes) 
         };
 
     } catch (error) {
-        console.error('Failed to parse torrent:', error.message);
+        console.error('❌ Failed to parse torrent:', error.message);
         throw error; // Re-throw so caller can handle
     }
 }

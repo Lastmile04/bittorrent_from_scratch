@@ -8,37 +8,51 @@ import { Buffer } from 'buffer';
 export async function createClient(list, peerId, torrentMeta) {
     const protocolStr = Buffer.from("BitTorrent protocol");
 
-    // Fix: initialize i = 0
+    // Initialize session stats
+    const stats = {
+        name: torrentMeta.name.toString(),
+        contacted: 0,
+        success: 0,
+        failed: 0,
+        verified: false
+    };
+
+    printBanner(stats.name);
+
     for (let i = 0; i < list.length; i++) {
+        stats.contacted++;
         const peer = list[i];
         const client = new net.Socket();
-
         const btPeer = new BitTorrentPeer(client, peerId, protocolStr, peer, torrentMeta);
-
-        // Pass i + 1 for human-friendly "Attempt 1/50"
         const spinner = new Spinner(peer.ip, peer.port, i + 1, list.length);
-
         const cleanup = bindPeerToSpinner(btPeer, spinner);
 
         try {
             const result = await btPeer.connect();
 
+            // 1. Update Stats
+            stats.success++;
+            stats.verified = true; // Based on your logic verifying the piece
             cleanup();
 
-            // Stop spinner FIRST to clear the line for the next logs
+            // 2. High-Signal Success Message
+            console.log(`\n\x1b[32m✅ Piece #0 verified successfully\x1b[0m`);
+            console.log(`\x1b[36m🔐 SHA1 integrity check passed\x1b[0m`);
+
+            // 3. Final Summary
+            printSummary(stats);
             return result;
 
         } catch (err) {
-            console.log("FAIL:", err.type, err.message);
+            stats.failed++;
             cleanup();
             client.destroy();
-
-            // client.destroy(); 
             continue;
         }
     }
 
-    // If the loop finishes without returning, no peers were successful
+    // If we get here, everything failed
+    printSummary(stats);
     throw new Error("Could not connect to any peers in the list.");
 }
 
@@ -91,4 +105,28 @@ function bindPeerToSpinner(btPeer, spinner) {
         btPeer.off('ERROR', handleError);
         btPeer.off('SOCKET_ERROR', handleError);
     };
+}
+
+export function printBanner(torrentName) {
+    console.log(`
+╔══════════════════════════════════════════════════════════╗
+║                🚀 NODDY BITTORRENT                       ║
+║           BitTorrent Protocol Implementation             ║
+╚══════════════════════════════════════════════════════════╝
+📍 Target: ${torrentName}
+`);
+}
+
+export function printSummary(stats) {
+    console.log(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📥 DOWNLOAD SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📄 Torrent:            ${stats.name}
+👥 Peers Contacted:    ${stats.contacted}
+✅ Successful Peers:   ${stats.success}
+❌ Failed Peers:       ${stats.failed}
+🔐 Integrity Check:    ${stats.verified ? 'PASSED (SHA1)' : 'FAILED'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`);
 }

@@ -18,10 +18,10 @@ const torrentMeta = parseTorrentFile(torrentPath);
 const peerId = generatePeerId('PC', '0001');
 const left = torrentMeta.totalLength;
 
-console.log('trackers:', torrentMeta.announceList);
-console.log('infoHash:', torrentMeta.infoHash);
-console.log('peerId:', peerId);
-console.log('left: ', left)
+// console.log('trackers:', torrentMeta.announceList);
+// console.log('infoHash:', torrentMeta.infoHash);
+// console.log('peerId:', peerId);
+// console.log('left: ', left)
 
 // Static/identity -> peerID, port
 // Torrnet Specific -> infoHash, left
@@ -38,9 +38,10 @@ const trackerParams = {
 }
 
 const result = await urlDispatcher(torrentMeta.announceList, trackerParams);
-console.log(`Peers: ${result.peers.length}`);
-console.log(result.peers);
-console.log(result.peerStats);
+
+console.log('🌐 Tracker connected');
+console.log(`👥 Peers discovered: ${result.peers.length}`);
+console.log(`⏱ Announce interval: ${result.peerStats.interval}`);
 
 // In this MVP I don't need to server behaviour and only need the client implemetation
 // server implementation will be in future updates 
