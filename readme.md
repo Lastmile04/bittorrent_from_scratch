@@ -28,7 +28,7 @@ The current milestone implements a functioning BitTorrent protocol MVP featuring
 ![BitTorrent Demo](./3_bittorrent/src/assets/demo.gif)
 
 ➡️ Full BitTorrent implementation details:
-[View Full BitTorrent Documentation →](./3_bittorrent/README.md)
+[View Full BitTorrent Documentation →](./3_bittorrent/readme.md)
 
 ---
 
@@ -94,7 +94,7 @@ Implemented features include:
 - Stateful terminal observability dashboard
 
 ➡️ Detailed documentation:
-[View Full BitTorrent Documentation →](./3_bittorrent/README.md))
+[View Full BitTorrent Documentation →](./3_bittorrent/readme.md))
 
 ---
 
