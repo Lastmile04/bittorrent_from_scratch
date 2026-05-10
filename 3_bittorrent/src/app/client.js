@@ -2,7 +2,7 @@ import net from 'net';
 import { BitTorrentPeer } from '../transport/BitTorrentPeer.js';
 import { Spinner } from '../presentation/spinner.js';
 import { Buffer } from 'buffer';
-import { stdout } from 'process';
+
 
 // MVP: return first successful peer  
 export async function createClient(list, peerId, torrentMeta) {
@@ -46,59 +46,49 @@ export async function createClient(list, peerId, torrentMeta) {
 
 //  Currently this approach is sequential, even though in real world it's parallel + promise.race
 // NOTE: this design decision is for MVP and will be updated in future iterations
-
 function bindPeerToSpinner(btPeer, spinner) {
-    const onConnecting = () => {
-        console.log("CONNECTING EVENT FIRED");
-        spinner.onConnecting();
+    // We map technical events to human-readable "Phases"
+    const handleConnecting = () => {
+        spinner.start();
+        spinner.updatePhase('TCP-Wait');
     };
-    const onSuccess = (data) => spinner.onSuccess(data);
-    const onHandshakeSuccess = () => spinner.onHandshakeSuccess('success');
-    const onFail = (err) => spinner.onFail(err);
 
-    btPeer.on('CONNECTING', onConnecting);
-    btPeer.on('HANDSHAKE_SUCCESS', onHandshakeSuccess);
+    const handleHandshake = () => spinner.updatePhase('Handshake');
 
-    btPeer.on('CONNECT_SUCCESS', (data) => { console.log(`Peer ${data.peer} connection successsful`) });
+    const handleUnchoke = () => spinner.updatePhase('Downloading');
 
-    btPeer.on("CONNECTION_CLOSED", (data) => { console.log(`Peer ${data.peer} connection closed`) });
+    // Progress Bar 
+    const handleProgress = (percent) => {
+        spinner.updateProgress(percent);
+    };
 
-    btPeer.on("SOCKET_CLOSED", (data) => { console.log(`Peer ${data.peer} socket closed`) });
+    // Lifecycle & Graveyard 
+    const handleSuccess = (data) => {
+        spinner.updateProgress(100);
+        spinner.stop('success', `Piece ${data.index} verified`);
+    };
 
-    btPeer.on("BLOCK_RECEIVED", (payload) => {
-        process.stdout.write(
-            `\nIndex: ${payload.index}
-        \nBegin: ${payload.begin}
-        \nLength: ${payload.blockLength}`
-        )
-    });
+    const handleError = (err) => {
+        // We use err.type if your transport provides it, or just a generic message
+        spinner.stop('fail', err.message || 'Unknown Error');
+    };
 
-    btPeer.on("PROGRESS", (data) => {
-        process.stdout.write(
-            `\n PROGRESS: ${data}`
-        )
-    });
-
-    btPeer.on("REQUEST_SENT", (payload) => {
-        process.stdout.write(
-            `\nIndex: ${payload.index}
-            \n Begin: ${payload.begin}
-            \n Length: ${payload.length}`
-        )
-    });
-
-    btPeer.on("PEER_UNCHOKE", () => { console.log("Peer Unchoke") });
-    btPeer.on("PIECE_DOWNLOAD_SUCCESS", (data) => onSuccess(data));
-
-
-    btPeer.on('ERROR', onFail);
-    btPeer.on("PEER_ERROR", onFail);
-    btPeer.on("SOCKET_ERROR", onFail);
+    // Attachment
+    btPeer.on('CONNECTING', handleConnecting);
+    btPeer.on('HANDSHAKE_SUCCESS', handleHandshake);
+    btPeer.on('PEER_UNCHOKE', handleUnchoke);
+    btPeer.on('PROGRESS', handleProgress);
+    btPeer.on('PIECE_DOWNLOAD_SUCCESS', handleSuccess);
+    btPeer.on('ERROR', handleError);
+    btPeer.on('SOCKET_ERROR', handleError);
 
     return () => {
-        btPeer.off('CONNECTING', onConnecting);
-        btPeer.off('HANDSHAKE_SUCCESS', onHandshakeSuccess);
-        btPeer.off('ERROR', onFail);
-        btPeer.off("PIECE_DOWNLOAD_SUCCESS", onSuccess);
-    }
+        btPeer.off('CONNECTING', handleConnecting);
+        btPeer.off('HANDSHAKE_SUCCESS', handleHandshake);
+        btPeer.off('PEER_UNCHOKE', handleUnchoke);
+        btPeer.off('PROGRESS', handleProgress);
+        btPeer.off('PIECE_DOWNLOAD_SUCCESS', handleSuccess);
+        btPeer.off('ERROR', handleError);
+        btPeer.off('SOCKET_ERROR', handleError);
+    };
 }

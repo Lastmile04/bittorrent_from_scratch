@@ -7,61 +7,54 @@ export class Spinner {
         this.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         this.running = false;
         this.timer = null;
-        this.cursorHidden = false;
+        
+        // UI State
+        this.phase = 'CONNECT'; 
+        this.progress = 0;
+        this.statusMsg = ''; 
+    }
+
+    // Progress Bar Logic
+    renderProgressBar() {
+        const size = 15;
+        const completed = Math.floor((this.progress / 100) * size);
+        const remaining = size - completed;
+        return `[${'■'.repeat(completed)}${'□'.repeat(remaining)}] ${this.progress}%`;
     }
 
     start() {
         if (this.running) return;
         this.running = true;
+        process.stdout.write('\u001B[?25l'); 
 
         let x = 0;
-        if (!this.cursorHidden) {
-            process.stdout.write('\u001B[?25l'); // hide cursor
-            this.cursorHidden = true;
-        }
-
         this.timer = setInterval(() => {
             const frame = this.frames[x++ % this.frames.length];
-            process.stdout.write(`\r\x1B[2K${frame} Trying ${this.ip}:${this.port} (attempt ${this.attempt}/${this.max})`);
+            const bar = this.progress > 0 ? ` | ${this.renderProgressBar()}` : '';
+            const phase = `\x1b[33m[${this.phase}]\x1b[0m`;
+            
+            // Render the full line state
+            process.stdout.write(`\r\x1B[2K${frame} ${phase} ${this.ip}:${this.port} (atmt ${this.attempt}/${this.max})${bar}`);
         }, 80);
     }
 
-    stop(status) {
+    // State updaters
+    updatePhase(p) { this.phase = p.toUpperCase(); }
+    updateProgress(p) { this.progress = p; }
+
+    // The Graveyard
+    // This persists the line by simply moving to a NEW line after stopping
+    stop(status, finalMsg = '') {
         if (!this.running) return;
         this.running = false;
+        clearInterval(this.timer);
+        process.stdout.write('\u001B[?25h'); 
 
-        if (this.timer) {
-            clearInterval(this.timer);
-            this.timer = null;
-        }
-
-        if (this.cursorHidden) {
-            process.stdout.write('\u001B[?25h'); // show cursor
-            this.cursorHidden = false;
-        }
-
-        const symbol = status === 'success' ? '✔' : '✖';
-        // Clear the line one last time so the final message is clean
-        process.stdout.write(`\r\x1B[2K${symbol} Peer ${this.ip}:${this.port} - ${status.toUpperCase()} \n`);
-    }
-
-    onConnecting() {
-        this.start(); // show animated "Trying ..."
-    }
-
-    onSuccess(data) {
-        this.stop('success');
-        process.stdout.write(`Piece Downloaded Successfully | index: ${data.index} `);
-    }
-
-    onFail(err) {
-        this.stop('fail');
-        process.stdout.write(`      Reason: ${err.message}\n`);
-    }
-
-    onHandshakeSuccess(status) {
-        const symbol = status === 'Handshake success' ? '✔' : '✖';
-        // Clear the line one last time so the final message is clean
-        process.stdout.write(`\r\x1B[2K${symbol} Peer ${this.ip}:${this.port} - ${status.toUpperCase()}\n`);
+        const isSuccess = status === 'success';
+        const symbol = isSuccess ? '\x1b[32m✔\x1b[0m' : '\x1b[31m✖\x1b[0m';
+        const label = isSuccess ? 'COMPLETE' : 'FAILED';
+        
+        // Finalize line and move cursor down to keep this in the "Graveyard"
+        process.stdout.write(`\r\x1B[2K${symbol} ${this.ip}:${this.port} - ${label}: ${finalMsg}\n`);
     }
 }
