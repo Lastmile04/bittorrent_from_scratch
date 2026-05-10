@@ -1,115 +1,232 @@
-# bittorrent_from_scratch
+# Noddy BitTorrent
 
-A from-scratch exploration of **network protocols** — building HTTP, TCP, and BitTorrent step by step using **Node.js**, with a strong focus on **protocol correctness, byte-level behavior, and clean architecture**.
+A from-scratch exploration of network protocols using Node.js, focused on
+understanding how networking systems work internally through protocol-correct,
+byte-level implementations.
 
-This repository is not a production client.  
-It is a **learning-driven, protocol-first implementation** aimed at understanding *how things actually work under the hood*.
+This repository progresses protocol-layer by protocol-layer, starting from
+HTTP fundamentals and TCP behavior before arriving at a working BitTorrent
+protocol MVP.
+
+The goal of this project is not production readiness, but deep understanding
+of networking protocols, binary parsing, event-driven systems, and layered
+architecture design.
 
 ---
 
-## Project Structure
+## Current Demo — BitTorrent MVP
 
-Each top-level folder represents a **protocol layer or milestone**, built independently and incrementally.
+The current milestone implements a functioning BitTorrent protocol MVP featuring:
 
+- HTTP & UDP tracker communication
+- Peer discovery
+- BitTorrent handshakes
+- Piece downloading
+- SHA1 piece verification
+- Stateful terminal dashboard
+
+![BitTorrent Demo](./3_bittorrent/assets/demo.gif)
+
+➡️ Full BitTorrent implementation details:
+[3_bittorrent/README.md](./3_bittorrent/README.md)
+
+---
+
+## Repository Structure
+
+Each top-level folder represents a protocol layer or networking milestone,
+implemented independently and incrementally.
+
+```txt
 bittorrent_from_scratch/
-├── 1_http/ # HTTP fundamentals from raw sockets
-├── 2_tcp/ # TCP behavior, framing, state machines
-├── 3_bittorrent/ # BitTorrent protocol (current focus)
+├── 1_http/          # HTTP fundamentals from raw sockets
+├── 2_tcp/           # TCP framing, buffering, state machines
+├── 3_bittorrent/    # BitTorrent protocol MVP
+```
 
-
-Each stage builds on concepts from the previous one.
-
----
-
-## Current Focus: BitTorrent (`3_bittorrent/`)
-
-The BitTorrent implementation is structured around **clear protocol layers**, rather than ad-hoc parsing.
-
-3_bittorrent/
-├── identity/ # Torrent identity & admissibility
-├── codec/ # Bencode encoding / decoding
-├── transport/ # TCP networking primitives
-├── app/ # Orchestration / CLI entry points
-├── samples/ # Sample .torrent files
-
-
-### Identity Layer (Core)
-Responsible for defining *what a torrent is*:
-
-- **Bencode validation** (grammar + semantic rules)
-- **Exact `info` dictionary extraction**
-- **Protocol-correct SHA-1 info hash computation**
-
-Identity is derived from **raw bytes**, not decoded structures.
+Each stage builds upon concepts explored in the previous one.
 
 ---
 
-### Codec Layer
-- Implements **bencode encode/decode**
-- Used only when *meaning* is required
-- Never used for identity or hashing
+## Protocol Progression
+
+### 1. HTTP Fundamentals (`1_http/`)
+
+Exploration of HTTP communication and request/response handling using
+raw socket-level networking primitives.
+
+Key topics explored:
+- HTTP request structure
+- Raw socket communication
+- Request parsing
+- Response serialization
+- Stateful connection handling
 
 ---
 
-### Transport Layer
-- TCP socket handling
-- Byte streaming
-- No protocol knowledge
+### 2. TCP Behavior & State Machines (`2_tcp/`)
+
+Focused exploration of TCP stream behavior, framing problems, buffering,
+and protocol state management.
+
+Key topics explored:
+- Incremental stream parsing
+- Buffer accumulation
+- Message framing
+- Protocol state machines
+- Event-driven transport behavior
 
 ---
 
-### App Layer
-- Entry points / loaders
-- Wires identity, codec, and transport together
-- No protocol logic lives here
+### 3. BitTorrent Protocol MVP (`3_bittorrent/`)
+
+A low-level BitTorrent client MVP built from scratch without external
+BitTorrent libraries.
+
+Implemented features include:
+- Bencode parsing and validation
+- SHA1 info-hash generation
+- HTTP & UDP tracker communication
+- Peer discovery
+- BitTorrent handshake negotiation
+- Piece/block downloading
+- SHA1 piece verification
+- Stateful terminal observability dashboard
+
+➡️ Detailed documentation:
+[3_bittorrent/README.md](./3_bittorrent/README.md)
 
 ---
 
 ## Design Principles
 
-- **Grammar over guessing**  
-  All traversal follows protocol grammar rules — no raw byte scanning.
+### Grammar Over Guessing
 
-- **Identity before meaning**  
-  Hashing happens on raw bytes, *before* decoding.
+All protocol traversal follows protocol grammar rules instead of raw
+byte scanning or heuristic parsing.
 
-- **Separation of concerns**  
-  Identity, codec, transport, and application logic are strictly separated.
+### Identity Before Meaning
 
-- **Protocol correctness first**  
-  Convenience and performance come second.
+Torrent identity is derived directly from raw bytes before decoding
+or interpretation occurs.
+
+### Separation Of Concerns
+
+Networking, protocol parsing, identity computation, and presentation
+layers remain intentionally separated.
+
+### Protocol Correctness First
+
+The project prioritizes correctness, observability, and architectural
+clarity over performance or feature completeness.
 
 ---
 
-## Why This Repo Exists
+## Current Status
 
-Many protocol implementations fail due to subtle mistakes such as:
+### HTTP Layer
+- ✅ Raw HTTP exploration complete
+
+### TCP Layer
+- ✅ TCP framing and state machine experiments complete
+
+### BitTorrent Layer
+- ✅ Torrent metadata parsing
+- ✅ HTTP tracker communication
+- ✅ UDP tracker communication
+- ✅ Peer discovery
+- ✅ BitTorrent handshake implementation
+- ✅ Piece downloading
+- ✅ SHA1 piece verification
+- 🚧 Multi-piece downloading
+- 🚧 Seeding/upload support
+- 🚧 Magnet link support
+- 🚧 DHT & PEX support
+
+---
+
+## What This Repository Focuses On
+
+This project intentionally emphasizes:
+
+- Networking fundamentals
+- Binary protocol parsing
+- Stateful protocol design
+- Event-driven architecture
+- Layered system organization
+- Incremental protocol implementation
+- Observability and debugging
+
+rather than:
+- maximum download throughput
+- production-grade optimization
+- feature completeness
+
+---
+
+## Why This Repository Exists
+
+Many networking and protocol implementations fail due to subtle mistakes such as:
 
 - Hashing decoded or re-encoded data
-- Scanning byte patterns instead of grammar walking
-- Mixing identity logic with networking
+- Treating TCP like packet-based transport
+- Mixing protocol parsing with transport logic
+- Ignoring fragmented stream behavior
+- Coupling observability directly to networking layers
 - Treating protocols as data formats instead of state machines
 
-This project intentionally avoids those pitfalls by making **architecture explicit**.
+This repository exists to deeply understand and avoid those pitfalls
+through manual implementation and architectural separation.
 
 ---
 
-## Status
+## Technologies Used
 
-- ✅ HTTP fundamentals explored
-- ✅ TCP behavior and state machines implemented
-- ✅ BitTorrent identity layer complete (validation + info hash)
-- 🚧 Peer protocol & handshake (in progress)
+- Node.js
+- TCP sockets (`net`)
+- UDP sockets (`dgram`)
+- Event-driven architecture
+- SHA1 hashing
+- Binary buffer manipulation
+
+---
+
+## Future Roadmap
+
+### BitTorrent Improvements
+- Parallel peer racing
+- Multi-piece downloading
+- Rarest-first piece selection
+- Request pipelining
+- Persistent file storage
+- Upload/seeding support
+- Magnet links
+- DHT implementation
+- Peer Exchange (PEX)
+
+### Tooling & Observability
+- Richer CLI dashboard
+- Transfer speed monitoring
+- Verbose/debug logging modes
+- Interactive torrent selection
+- Better terminal visualization
 
 ---
 
 ## Disclaimer
 
-This repository is for **learning and exploration**.
-It is not intended for production use.
+This repository was built for educational purposes to understand networking
+protocols and systems-level behavior internally.
+
+Please use responsibly and only download/share content you legally have
+the right to access.
 
 ---
 
 ## Author
 
-Built by **Lastmile04** as a deep dive into network protocols and systems-level thinking.
+Built by Lastmile04 as a deep dive into:
+- networking protocols
+- systems-level thinking
+- event-driven architecture
+- low-level protocol implementation
