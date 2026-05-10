@@ -18,7 +18,7 @@ The implementation progresses protocol-layer by protocol-layer:
 
 ## Demo
 
-![NoddyBitTorrent Demo](./assets/demo.gif)
+![NoddyBitTorrent Demo](./src/assets/demo.gif)
 
 ### Example Output
 
