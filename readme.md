@@ -25,10 +25,10 @@ The current milestone implements a functioning BitTorrent protocol MVP featuring
 - SHA1 piece verification
 - Stateful terminal dashboard
 
-![BitTorrent Demo](./3_bittorrent/assets/demo.gif)
+![BitTorrent Demo](./3_bittorrent/src/assets/demo.gif)
 
 ➡️ Full BitTorrent implementation details:
-[3_bittorrent/README.md](./3_bittorrent/README.md)
+[View Full BitTorrent Documentation →](./3_bittorrent/README.md)
 
 ---
 
@@ -94,7 +94,7 @@ Implemented features include:
 - Stateful terminal observability dashboard
 
 ➡️ Detailed documentation:
-[3_bittorrent/README.md](./3_bittorrent/README.md)
+[View Full BitTorrent Documentation →](./3_bittorrent/README.md))
 
 ---
 
