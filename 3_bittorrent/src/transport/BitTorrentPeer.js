@@ -461,7 +461,7 @@ export class BitTorrentPeer extends EventEmitter {
                 this.downloadedBytes += block.length;
 
                 this.emit("BLOCK_RECEIVED", { index: index, begin: begin, blockLength: block.length });
-                this.emit("PROGRESS", this.downloadedBytes / this.currentPieceLength);
+                this.emit("PROGRESS", (this.downloadedBytes / this.currentPieceLength) * 100);
 
                 this.pendingRequests.delete(key);
 
