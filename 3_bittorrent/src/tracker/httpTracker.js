@@ -14,8 +14,7 @@ import { validateBencode } from "../codec/validator.js";
 // import { bytesLeft } from "./bytesLeft.js";
 
 // decode from bencode.js
-export async function httpPeers(trackerUrl, infoHash, peerId, port, uploaded, downloaded, left, numwant, event) {
-    const paramsObj = { infoHash, peerId, port, uploaded, downloaded, left, numwant, event };
+export async function httpPeers(trackerUrl, paramsObj){  
     const url    = buildAnnounce(trackerUrl, paramsObj);
     const buffer = await fetchTracker(url);
 

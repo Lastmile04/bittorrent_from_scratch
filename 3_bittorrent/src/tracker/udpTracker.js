@@ -33,31 +33,20 @@ class RetryExhaustedError extends Error {
     }
 }
 
-
-export async function udpPeer(
-    trackerHost,
-    trackerPort,
-    infoHash,
-    peerId,
-    currPort,
-    uploaded,
-    downloaded,
-    left,
-    event,
-    numwant
-) {
+export async function udpPeer({ tracker, torrent, session }) {
     // take a dual stack approch to detemine which client to use UDP4 or UDP6 
 
     // dns loolkup gives {address:, family:} , use dns/promises in particular to remove the use of promisify, as now dns lookup just returns promise instead of callback
     // all: true returns all available ips associated with that particualr hostname
-    const addresses = await dns.lookup(trackerHost, { all: true });
+    const addresses = await dns.lookup(tracker.hostname, { all: true });
     if (addresses.length === 0) throw new Error('Empty tracker list!');
+
     // try 6 first if doesn't work fallback to ipv4
     // sort addresses keep 6 first
     addresses.sort((a, b) => b.family - a.family);
+
     // set a limit of addresses to lookup: right now the limit is 3 addresses from the list
     let addressLimit = Math.min(addresses.length, 3);
-
 
     for (let i = 0; i < addressLimit; i++) {
         let addr = addresses[i];
@@ -66,25 +55,23 @@ export async function udpPeer(
         try {
             socket = dgram.createSocket(addr.family === 6 ? "udp6" : "udp4");
             // send connect packet
-            const connectionId = await connect(socket, addr.address, trackerPort);
+            const connectionId = await connect(socket, addr.address, tracker.port);
             console.log('CONNECT packet received!');
-            // send announce packet
-            const peerINFO = await announce(
-                addr.family,
+
+            const transport = {
                 socket,
-                connectionId,
-                addr.address,
-                trackerPort,
-                infoHash,
-                peerId,
-                currPort,
-                downloaded,
-                left,
-                uploaded,
-                event,
-                numwant
-            );
-            console.log('ANNOUNCE packet received');
+                connectionId
+            }
+
+            const resolvedTracker = {
+                ...tracker,
+                address: addr.address,
+                family: addr.family
+            }
+
+            // send announce packet
+            const peerINFO = await announce(resolvedTracker, transport, torrent, session);
+            // console.log('ANNOUNCE packet received');
 
             return parsePeers(peerINFO, addr.family);
 
@@ -107,8 +94,8 @@ export async function udpPeer(
     throw new Error('All tracker addresses failed!');
 }
 
-//  transformValid is 
-function requestAttempt(socket, host, port, attemptNum, packetInfo, classifier, transformValid = (msg) => msg) {
+
+function requestAttempt(socket, hostname, port, attemptNum, packetInfo, classifier) {
     const { packet, txId } = packetInfo;
     const timeout = 15000 * 2 ** attemptNum;
 
@@ -137,7 +124,7 @@ function requestAttempt(socket, host, port, attemptNum, packetInfo, classifier, 
         };
 
         const msgListener = (msg, rinfo) => {
-            if (rinfo.address !== host || rinfo.port !== port) return;
+            if (rinfo.address !== hostname || rinfo.port !== port) return;
 
             const type = classifier(msg, txId);
 
@@ -150,7 +137,7 @@ function requestAttempt(socket, host, port, attemptNum, packetInfo, classifier, 
                 case "ignore":
                     return;
                 case "valid":
-                    return doneResolve(transformValid(msg));
+                    return doneResolve(msg);
                 default:
                     return;
             }
@@ -165,7 +152,7 @@ function requestAttempt(socket, host, port, attemptNum, packetInfo, classifier, 
             doneReject(new TrackerTimeoutError());
         }, timeout);
 
-        socket.send(packet, port, host, (err) => {
+        socket.send(packet, port, hostname, (err) => {
             if (err) doneReject(err);
         });
     });
@@ -175,23 +162,23 @@ function requestAttempt(socket, host, port, attemptNum, packetInfo, classifier, 
 
 
 // connect retry controller
-async function connect(socket, host, port) {
+async function connect(socket, hostname, port) {
 
     let lastError;
     const attemptLimit = 8;
     for (let attemptNum = 0; attemptNum < attemptLimit; attemptNum++) {
         try {
             const packetInfo = buildConnect();
-            const connectionId = await requestAttempt(
+
+            const response = await requestAttempt(
                 socket,
-                host,
+                hostname,
                 port,
                 attemptNum,
                 packetInfo,
                 classifyConnectResponse,
-                (msg) => msg.readBigUInt64BE(8)
             );
-            return connectionId;
+            return response.readBigUInt64BE(8);
         } catch (error) {
             lastError = error;
             if (error instanceof TrackerTimeoutError) continue; // retry
@@ -236,20 +223,24 @@ function classifyConnectResponse(msg, txId) {
 
 //--------annouce------------
 
-async function announce(family, socket, connectionId, trackerHost, trackerPort, infoHash, peerId, port, downloaded, left, uploaded, event, numwant) {
+async function announce(tracker, transport, torrent, session) {
     // attempt -> (build packet, setup listeners and other features, attach listeners, send packet, handle errors, receive and verify response )
 
     let lastError;
     const attemptLimit = 8;
+    const torrentData = {
+        infoHash: torrent.infoHash,
+        peerId: torrent.peerId
+    }
     for (let attemptNum = 0; attemptNum < attemptLimit; attemptNum++) {
         try {
-            const packetInfo = buildAnnounce(connectionId, infoHash, peerId, downloaded, left, uploaded, event, numwant, port);
-            const classifier = (msg, txId) => classifyAnnounceResponse(msg, txId, family);
+            const packetInfo = buildAnnounce(transport.connectionId, torrentData, session);
+            const classifier = (msg, txId) => classifyAnnounceResponse(msg, txId, tracker.family);
 
             const announceResponse = await requestAttempt(
-                socket,
-                trackerHost,
-                trackerPort,
+                transport.socket,
+                tracker.hostname,
+                tracker.port,
                 attemptNum,
                 packetInfo,
                 classifier
@@ -274,7 +265,11 @@ async function announce(family, socket, connectionId, trackerHost, trackerPort, 
 // so no -ive values in packet, but -1 is still valid semantic value
 // -1 to binary then hex is 0xFFFFFFFF
 // to maintain protocol correctness the field has to remain unsigned
-function buildAnnounce(connectionId, infoHash, peerId, downloaded, left, uploaded, event, numwant, port) {
+function buildAnnounce(connectionId, torrent, session) {
+
+    const { infoHash, peerId } = torrent;
+    const { downloaded, left, uploaded, event, numwant, port } = session;
+
     const key = crypto.randomBytes(4);
     const txId = crypto.randomBytes(4).readUInt32BE(0);
 
